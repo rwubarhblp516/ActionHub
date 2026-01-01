@@ -131,16 +131,7 @@ export const AssetPanel: React.FC<AssetPanelProps> = ({ activeItem }) => {
                 </section>
             </div>
 
-            <div className="shrink-0 p-6 bg-black/20 backdrop-blur-3xl border-t border-white/10">
-                <div className="flex items-center gap-4 px-5 py-4 rounded-2xl bg-indigo-500/5 border border-indigo-500/10 shadow-inner">
-                    <div className="w-10 h-10 rounded-xl bg-indigo-500/10 flex items-center justify-center shrink-0">
-                        <div className="w-2 h-2 rounded-full bg-indigo-500 animate-pulse shadow-[0_0_10px_rgba(99,102,241,0.5)]" />
-                    </div>
-                    <p className="text-[11px] text-indigo-400/80 font-black leading-relaxed uppercase tracking-wide">
-                        Warning: The rendering engine requires the path declarations within .atlas files to strictly match texture filenames (Case-sensitive).
-                    </p>
-                </div>
-            </div>
+
         </div>
     );
 };

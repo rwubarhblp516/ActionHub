@@ -2,7 +2,8 @@ import React, { useEffect, useRef, useState } from 'react';
 import { motion } from 'framer-motion';
 import { AnimationItem, ExportConfig } from '../types';
 import { SpineRenderer } from '../services/spineRenderer';
-import { Maximize, ZoomIn, ZoomOut, Crosshair, Play, Loader2, AlertCircle, RefreshCw, WifiOff } from 'lucide-react';
+import { Maximize, ZoomIn, ZoomOut, Crosshair, Play, Loader2, AlertCircle, RefreshCw, WifiOff, ChevronLeft, ChevronRight } from 'lucide-react';
+import { ProgressBar } from './ProgressBar';
 
 interface PreviewAreaProps {
   activeItem: AnimationItem | null;
@@ -11,9 +12,9 @@ interface PreviewAreaProps {
   onRendererReady: (renderer: SpineRenderer) => void;
 }
 
-// 候选 CDN 列表，按优先级排序
+// Spine 3.8 运行时 CDN 列表
 const SPINE_CDN_URLS = [
-  "/libs/spine-webgl.js", // 优先使用本地下载的版本，确保稳定性
+  "/libs/spine-webgl.js", // 本地版本优先
   "https://fastly.jsdelivr.net/gh/EsotericSoftware/spine-runtimes@3.8/spine-ts/build/spine-webgl.js",
   "https://jsd.cdn.zzko.cn/gh/EsotericSoftware/spine-runtimes@3.8/spine-ts/build/spine-webgl.js"
 ];
@@ -29,13 +30,13 @@ export const PreviewArea: React.FC<PreviewAreaProps> = ({
   const containerRef = useRef<HTMLDivElement>(null);
   const [animations, setAnimations] = useState<string[]>([]);
   const [currentAnim, setCurrentAnim] = useState<string>('');
+  const [isPlaying, setIsPlaying] = useState<boolean>(true);
 
   const [spineState, setSpineState] = useState<'loading' | 'ready' | 'error'>('loading');
   const [loadingMessage, setLoadingMessage] = useState('正在初始化...');
 
-  // 动态脚本加载器
+  // 动态加载 Spine 3.8 运行时
   useEffect(() => {
-    // 如果已经加载过，不再重复加载
     // @ts-ignore
     if (typeof window.spine !== 'undefined') {
       setSpineState('ready');
@@ -50,7 +51,7 @@ export const PreviewArea: React.FC<PreviewAreaProps> = ({
         script.src = url;
         script.async = true;
         script.onload = () => resolve();
-        script.onerror = () => reject(new Error(`Failed to load ${url}`));
+        script.onerror = () => reject(new Error(`加载失败: ${url}`));
         document.body.appendChild(script);
       });
     };
@@ -59,31 +60,28 @@ export const PreviewArea: React.FC<PreviewAreaProps> = ({
       for (let i = 0; i < SPINE_CDN_URLS.length; i++) {
         if (!isMounted) return;
         const url = SPINE_CDN_URLS[i];
-        setLoadingMessage(`正在加载引擎 (尝试源 ${i + 1}/${SPINE_CDN_URLS.length})...`);
+        setLoadingMessage(`正在加载引擎 (源 ${i + 1}/${SPINE_CDN_URLS.length})...`);
 
         try {
           await loadScript(url);
-          // 简单的验证
           // @ts-ignore
           if (typeof window.spine !== 'undefined') {
             if (isMounted) setSpineState('ready');
             return;
           }
         } catch (e) {
-          console.warn(`Source ${url} failed, trying next...`);
+          console.warn(`${url} 加载失败，尝试下一个...`);
         }
       }
       if (isMounted) setSpineState('error');
     };
 
     initSpine();
-
     return () => { isMounted = false; };
   }, []);
 
   const handleRetryLoad = () => {
     setSpineState('loading');
-    // 强制刷新页面是解决脚本加载问题最简单的方法
     window.location.reload();
   };
 
@@ -99,6 +97,15 @@ export const PreviewArea: React.FC<PreviewAreaProps> = ({
       const previewBg = config.backgroundColor === 'transparent' ? 'transparent' : config.backgroundColor;
       renderer.setBackgroundColor(previewBg);
       renderer.setScale(config.scale);
+      renderer.setTargetFPS(config.fps); // 设置初始帧率
+
+      // 立即设置正确的 canvas 尺寸
+      if (containerRef.current) {
+        const { width, height } = containerRef.current.getBoundingClientRect();
+        if (width > 0 && height > 0) {
+          renderer.resize(width, height);
+        }
+      }
 
       renderer.start();
       onRendererReady(renderer);
@@ -160,6 +167,32 @@ export const PreviewArea: React.FC<PreviewAreaProps> = ({
     };
     loadAsset();
   }, [activeItem, spineState]);
+
+  // 键盘快捷键: 左右箭头切换动画
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (!activeItem || animations.length === 0) return;
+
+      const currentIndex = animations.indexOf(currentAnim);
+
+      if (e.key === 'ArrowLeft') {
+        e.preventDefault();
+        const prevIndex = currentIndex > 0 ? currentIndex - 1 : animations.length - 1;
+        const prevAnim = animations[prevIndex];
+        setCurrentAnim(prevAnim);
+        rendererRef.current?.setAnimation(prevAnim);
+      } else if (e.key === 'ArrowRight') {
+        e.preventDefault();
+        const nextIndex = currentIndex < animations.length - 1 ? currentIndex + 1 : 0;
+        const nextAnim = animations[nextIndex];
+        setCurrentAnim(nextAnim);
+        rendererRef.current?.setAnimation(nextAnim);
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [activeItem, animations, currentAnim]);
 
   return (
     <div className="flex-1 flex flex-col h-full bg-transparent overflow-hidden">
@@ -255,6 +288,89 @@ export const PreviewArea: React.FC<PreviewAreaProps> = ({
           backgroundPosition: config.backgroundColor === 'transparent' ? '0 0, 0 10px, 10px -10px, -10px 0px' : undefined
         }}
       >
+        {/* Playback Controls Overlay */}
+        {spineState === 'ready' && activeItem && (
+          <div className="absolute bottom-6 left-1/2 -translate-x-1/2 flex items-center gap-4 bg-black/60 backdrop-blur-xl border border-white/10 px-6 py-3 rounded-full z-40 shadow-2xl">
+            {/* 动画切换按钮 */}
+            <button
+              onClick={() => {
+                const currentIndex = animations.indexOf(currentAnim);
+                const prevIndex = currentIndex > 0 ? currentIndex - 1 : animations.length - 1;
+                const prevAnim = animations[prevIndex];
+                setCurrentAnim(prevAnim);
+                rendererRef.current?.setAnimation(prevAnim);
+              }}
+              disabled={animations.length <= 1}
+              className="w-8 h-8 rounded-full bg-white/10 text-white flex items-center justify-center hover:bg-white/20 active:scale-95 transition-all disabled:opacity-30 disabled:cursor-not-allowed"
+              title="上一个动画 (←)"
+            >
+              <ChevronLeft size={16} />
+            </button>
+
+            {/* 播放/暂停按钮 */}
+            <button
+              onClick={() => {
+                const newPlayingState = !isPlaying;
+                setIsPlaying(newPlayingState);
+                rendererRef.current?.setPaused(!newPlayingState);
+              }}
+              className="w-10 h-10 rounded-full bg-white text-black flex items-center justify-center hover:scale-110 active:scale-95 transition-all shadow-lg shadow-white/20"
+              title={isPlaying ? '暂停' : '播放'}
+            >
+              {isPlaying ? (
+                <span className="w-3 h-3 bg-black rounded-[1px]" />
+              ) : (
+                <Play size={18} className="ml-1 fill-black" />
+              )}
+            </button>
+
+            {/* 动画切换按钮 */}
+            <button
+              onClick={() => {
+                const currentIndex = animations.indexOf(currentAnim);
+                const nextIndex = currentIndex < animations.length - 1 ? currentIndex + 1 : 0;
+                const nextAnim = animations[nextIndex];
+                setCurrentAnim(nextAnim);
+                rendererRef.current?.setAnimation(nextAnim);
+              }}
+              disabled={animations.length <= 1}
+              className="w-8 h-8 rounded-full bg-white/10 text-white flex items-center justify-center hover:bg-white/20 active:scale-95 transition-all disabled:opacity-30 disabled:cursor-not-allowed"
+              title="下一个动画 (→)"
+            >
+              <ChevronRight size={16} />
+            </button>
+
+            <div className="w-px h-6 bg-white/10" />
+
+            {/* 帧率设置 */}
+            <div className="flex items-center gap-2">
+              <span className="text-[9px] text-white/50 font-black uppercase tracking-wider">帧率:</span>
+              {[24, 30, 60].map(fps => (
+                <button
+                  key={fps}
+                  onClick={() => {
+                    onUpdateConfig({ fps });
+                    if (rendererRef.current && typeof rendererRef.current.setTargetFPS === 'function') {
+                      rendererRef.current.setTargetFPS(fps);
+                    }
+                  }}
+                  className={`px-2.5 py-1 rounded-lg text-[10px] font-black transition-all ${config.fps === fps
+                    ? 'bg-indigo-500 text-white shadow-lg shadow-indigo-500/30'
+                    : 'text-white/60 hover:text-white hover:bg-white/10'
+                    }`}
+                >
+                  {fps}
+                </button>
+              ))}
+            </div>
+
+            <div className="w-px h-6 bg-white/10" />
+
+            {/* Simple Progress Bar */}
+            <ProgressBar renderer={rendererRef.current} />
+          </div>
+        )}
+
         {/* WebGL Canvas */}
         <canvas
           ref={canvasRef}

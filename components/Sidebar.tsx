@@ -143,20 +143,15 @@ export const Sidebar: React.FC<SidebarProps> = ({
                       </div>
                     </div>
 
-                    <div className="flex items-center gap-2 px-1">
-                      {selectedIds.has(item.id) && (
-                        <div className="w-2 h-2 rounded-full bg-white shadow-[0_0_10px_rgba(255,255,255,0.8)]" />
-                      )}
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          onDelete(item.id);
-                        }}
-                        className="opacity-0 group-hover:opacity-100 p-2 text-white/40 hover:text-red-400 hover:bg-red-500/10 rounded-xl transition-all"
-                      >
-                        <Trash2 size={16} />
-                      </button>
-                    </div>
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onDelete(item.id);
+                      }}
+                      className="opacity-0 group-hover:opacity-100 p-2 text-white/40 hover:text-red-400 hover:bg-red-500/10 rounded-xl transition-all"
+                    >
+                      <Trash2 size={16} />
+                    </button>
                   </div>
                 </motion.div>
               ))

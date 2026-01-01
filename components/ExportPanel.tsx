@@ -44,20 +44,23 @@ export const ExportPanel: React.FC<ExportPanelProps> = ({
               <div className="w-9 h-9 rounded-2xl bg-white/[0.05] flex items-center justify-center border border-white/10 shadow-lg">
                 <Monitor size={16} className="text-indigo-400" />
               </div>
-              <span className="text-[11px] text-white font-black uppercase tracking-widest px-1">输出分辨率 (Resolution)</span>
+              <div className="flex flex-col gap-1">
+                <span className="text-[11px] text-white font-black uppercase tracking-widest">输出分辨率 (Resolution)</span>
+                <span className="text-[9px] text-white/40 font-bold">渲染质量取决于原始资产尺寸</span>
+              </div>
             </div>
 
             <div className="grid grid-cols-2 gap-3 p-1">
               {[
-                { label: 'HD 720p', w: 1280, h: 720 },
-                { label: 'Full HD 1080p', w: 1920, h: 1080 },
-                { label: '2K QHD', w: 2560, h: 1440 },
-                { label: '4K UHD', w: 3840, h: 2160 },
+                { label: '方形 720', w: 720, h: 720 },
+                { label: '方形 1080', w: 1080, h: 1080 },
+                { label: '竖屏 720x1280', w: 720, h: 1280 },
+                { label: '竖屏 1080x1920', w: 1080, h: 1920 },
               ].map((res) => (
                 <button
                   key={res.label}
                   onClick={() => onUpdate({ width: res.w, height: res.h })}
-                  className={`py-4 rounded-[20px] text-[10px] font-black uppercase tracking-tight transition-all border-2 ${config.width === res.w
+                  className={`py-4 rounded-[20px] text-[10px] font-black uppercase tracking-tight transition-all border-2 ${config.width === res.w && config.height === res.h
                     ? 'bg-white text-black border-white shadow-xl shadow-white/10 scale-[1.02]'
                     : 'bg-white/[0.03] border-white/5 text-white/70 hover:bg-white/[0.08] hover:border-white/20 hover:text-white'
                     }`}
@@ -96,7 +99,10 @@ export const ExportPanel: React.FC<ExportPanelProps> = ({
               <div className="w-9 h-9 rounded-2xl bg-white/[0.05] flex items-center justify-center border border-white/10 shadow-lg">
                 <Zap size={16} className="text-indigo-400" />
               </div>
-              <span className="text-[11px] text-white font-black uppercase tracking-widest px-1">动态速率 (Frame Rate)</span>
+              <div className="flex flex-col gap-1">
+                <span className="text-[11px] text-white font-black uppercase tracking-widest">输出帧率 (Frame Rate)</span>
+                <span className="text-[9px] text-white/40 font-bold">与预览播放帧率同步</span>
+              </div>
             </div>
             <div className="flex bg-black/40 backdrop-blur-md rounded-[20px] p-1.5 border border-white/10 shadow-inner">
               {[24, 30, 60].map((fps) => (
@@ -114,28 +120,44 @@ export const ExportPanel: React.FC<ExportPanelProps> = ({
             </div>
           </div>
 
-          {/* Section: Duration */}
+          {/* Section: Video Format */}
           <div className="flex flex-col gap-5">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-3">
-                <div className="w-9 h-9 rounded-2xl bg-white/[0.05] flex items-center justify-center border border-white/10 shadow-lg">
-                  <Clock size={16} className="text-indigo-400" />
-                </div>
-                <span className="text-[11px] text-white font-black uppercase tracking-widest px-1">支持时长 (Duration)</span>
+            <div className="flex items-center gap-3">
+              <div className="w-9 h-9 rounded-2xl bg-white/[0.05] flex items-center justify-center border border-white/10 shadow-lg">
+                <Film size={16} className="text-indigo-400" />
               </div>
-              <div className="px-3 py-1 rounded-full bg-indigo-500/20 border border-indigo-500/30">
-                <span className="text-[12px] font-mono text-indigo-300 font-black">{config.duration}s</span>
+              <div className="flex flex-col gap-1">
+                <span className="text-[11px] text-white font-black uppercase tracking-widest">视频格式 (Format)</span>
+                <span className="text-[9px] text-white/40 font-bold">编码器与兼容性</span>
               </div>
             </div>
-            <div className="px-2">
-              <input
-                type="range"
-                min="1"
-                max="60"
-                value={config.duration}
-                onChange={(e) => onUpdate({ duration: parseInt(e.target.value) })}
-                className="w-full h-1.5 bg-white/10 rounded-full appearance-none cursor-pointer accent-indigo-500 hover:bg-white/20 transition-all shadow-inner"
-              />
+            <div className="flex flex-col gap-2">
+              {[
+                { value: 'png-sequence', label: 'PNG 序列 (推荐)', desc: '兼容EbSynth等工具' },
+                { value: 'jpg-sequence', label: 'JPG 序列', desc: '文件更小' },
+                { value: 'mp4-h264', label: 'MP4 (H.264)', desc: '真正的MP4,通用格式' },
+                { value: 'webm-vp9', label: 'WebM (VP9)', desc: '高质量视频' },
+                { value: 'webm-vp8', label: 'WebM (VP8)', desc: '兼容性好' },
+              ].map((fmt) => (
+                <button
+                  key={fmt.value}
+                  onClick={() => onUpdate({ format: fmt.value as any })}
+                  className={`py-3 px-4 rounded-[16px] text-left transition-all border ${config.format === fmt.value
+                    ? 'bg-white/15 text-white border-white/20 shadow-lg'
+                    : 'bg-white/[0.03] border-white/5 text-white/70 hover:bg-white/[0.08] hover:border-white/20'
+                    }`}
+                >
+                  <div className="flex items-center justify-between">
+                    <div className="flex flex-col gap-1">
+                      <span className="text-[11px] font-black">{fmt.label}</span>
+                      <span className="text-[9px] text-white/40 font-bold">{fmt.desc}</span>
+                    </div>
+                    {config.format === fmt.value && (
+                      <div className="w-2 h-2 rounded-full bg-indigo-500 shadow-[0_0_8px_rgba(99,102,241,0.6)]" />
+                    )}
+                  </div>
+                </button>
+              ))}
             </div>
           </div>
 
@@ -152,8 +174,8 @@ export const ExportPanel: React.FC<ExportPanelProps> = ({
               <button
                 onClick={() => onUpdate({ backgroundColor: config.backgroundColor === 'transparent' ? '#0b0c10' : 'transparent' })}
                 className={`px-4 py-1.5 rounded-xl text-[9px] font-black uppercase tracking-widest border transition-all ${config.backgroundColor === 'transparent'
-                    ? 'bg-indigo-500 text-white border-indigo-400 shadow-[0_0_15px_rgba(99,102,241,0.4)]'
-                    : 'bg-white/5 text-white/40 border-white/10 hover:border-white/20'
+                  ? 'bg-indigo-500 text-white border-indigo-400 shadow-[0_0_15px_rgba(99,102,241,0.4)]'
+                  : 'bg-white/5 text-white/40 border-white/10 hover:border-white/20'
                   }`}
               >
                 {config.backgroundColor === 'transparent' ? 'Alpha Enabled' : 'Use Transparency'}
@@ -167,8 +189,8 @@ export const ExportPanel: React.FC<ExportPanelProps> = ({
                 if (input) input.click();
               }}
               className={`flex items-center gap-4 p-4 rounded-3xl border transition-all shadow-lg relative overflow-hidden ${config.backgroundColor === 'transparent'
-                  ? 'bg-black/20 border-white/5 cursor-not-allowed opacity-60'
-                  : 'bg-white/[0.04] border-white/10 hover:border-white/20 cursor-pointer group active:scale-[0.98]'
+                ? 'bg-black/20 border-white/5 cursor-not-allowed opacity-60'
+                : 'bg-white/[0.04] border-white/10 hover:border-white/20 cursor-pointer group active:scale-[0.98]'
                 }`}
             >
               <input

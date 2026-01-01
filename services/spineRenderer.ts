@@ -1,13 +1,12 @@
-/* 
- * Real Spine WebGL Renderer Implementation
- * Uses the global `spine` object loaded via <script> tag in index.html
- * Adapted to support Spine 3.8 (legacy namespace) and 4.0+ (flat namespace)
+/**
+ * Spine WebGL 渲染器 - 使用 Spine 3.8 运行时
+ * 通过全局 spine 对象（从 script 标签加载）
  */
 
 import { SpineFiles } from '../types';
 import { createAssetUrls, revokeAssetUrls } from './spineLoader';
 
-// Declare global spine object
+// 声明全局 spine 对象
 declare var spine: any;
 
 export class SpineRenderer {
@@ -15,217 +14,227 @@ export class SpineRenderer {
   gl: WebGLRenderingContext;
   urls: Record<string, string> = {};
 
-  // Spine Runtime Objects
+  // Spine 运行时对象
   shader: any = null;
   batcher: any = null;
   mvp: any = null;
   skeletonRenderer: any = null;
+  shapeRenderer: any = null; // Debug
 
   skeleton: any = null;
   state: any = null;
   bounds: any = null;
 
-  // Render State
+  // 渲染状态
   lastTime: number = 0;
   requestId: number = 0;
+  lastDebugLog: number = 0; // Debug throttle
 
-  // Configuration
-  bgColor: number[] = [0.2, 0.2, 0.2, 1];
+  // 配置
+  bgColor: number[] = [0, 0, 0, 0]; // 默认透明
   scale: number = 1.0;
 
-  // API Compat Helpers
-  spineWebGL: any = null; // Reference to the namespace containing webgl classes
+  // Spine 3.8 兼容层
+  spineWebGL: any = null;
 
   constructor(canvas: HTMLCanvasElement) {
     this.canvas = canvas;
-    // Ensure WebGL context
+
     const gl = canvas.getContext('webgl', {
       alpha: true,
-      premultipliedAlpha: true,
+      premultipliedAlpha: true,  // Spine 纹理通常是 PMA 格式
       preserveDrawingBuffer: true
     }) as WebGLRenderingContext;
-    if (!gl) {
-      throw new Error("WebGL not supported");
-    }
+
+    if (!gl) throw new Error('WebGL 不可用');
     this.gl = gl;
 
-    // Enable BLEND for transparency (Required for Spine)
+    // 启用混合 - PMA 模式使用 ONE, ONE_MINUS_SRC_ALPHA
     gl.enable(gl.BLEND);
     gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
 
     if (typeof spine === 'undefined') {
-      throw new Error("Spine Runtime not loaded");
+      throw new Error('Spine 运行时未加载');
     }
 
-    // --- Version Compatibility Layer ---
-    // Spine 3.8 puts WebGL classes in `spine.webgl`
-    // Spine 4.0+ puts them in `spine`
+    // Spine 3.8 使用 spine.webgl 命名空间
     this.spineWebGL = spine.webgl ? spine.webgl : spine;
 
-    // Shader
-    if (this.spineWebGL.Shader) {
-      this.shader = this.spineWebGL.Shader.newTwoColoredTextured(gl);
-    } else {
-      throw new Error("Spine Shader class not found. Check Runtime version.");
+    // 创建 Shader - 使用 TwoColoredTextured（官方推荐）
+    this.shader = this.spineWebGL.Shader.newTwoColoredTextured(gl);
+
+    // 创建 Batcher - 使用默认配置（启用 twoColorTint）
+    this.batcher = new this.spineWebGL.PolygonBatcher(gl);
+
+    // 创建 MVP 矩阵
+    this.mvp = new this.spineWebGL.Matrix4();
+
+    // 创建 SkeletonRenderer
+    this.skeletonRenderer = new this.spineWebGL.SkeletonRenderer(gl);
+    // PMA 模式
+    if (typeof this.skeletonRenderer.premultipliedAlpha !== 'undefined') {
+      this.skeletonRenderer.premultipliedAlpha = true;
     }
-
-    // Batcher
-    const BatcherClass = this.spineWebGL.PolygonBatcher || this.spineWebGL.Batcher; // 3.8 might be PolygonBatcher
-    if (BatcherClass) {
-      this.batcher = new BatcherClass(gl);
-    } else {
-      throw new Error("Spine Batcher class not found.");
-    }
-
-    // MVP Matrix
-    const MatrixClass = this.spineWebGL.Matrix4;
-    this.mvp = new MatrixClass();
-    this.mvp.ortho2d(0, 0, canvas.width - 1, canvas.height - 1);
-
-    // SkeletonRenderer
-    const RendererClass = this.spineWebGL.SkeletonRenderer;
-    this.skeletonRenderer = new RendererClass(gl);
+    console.log('[SpineRenderer] 初始化完成, premultipliedAlpha: true');
   }
 
   async load(files: SpineFiles): Promise<string[]> {
-    if (typeof spine === 'undefined') return [];
-
-    // Cleanup previous
-    if (this.skeleton) {
-      this.skeleton = null;
-      this.state = null;
-    }
+    // 清理之前的资源
+    this.skeleton = null;
+    this.state = null;
+    this.bounds = null;
     revokeAssetUrls(this.urls);
 
-    // 1. Generate Blob URLs for all files
+    if (!files.skeleton || !files.atlas) {
+      throw new Error('缺少骨骼文件或图集文件');
+    }
+
+    // 创建 Blob URLs
     this.urls = createAssetUrls(files);
 
     try {
-      if (!files.skeleton || !files.atlas) {
-        throw new Error("Missing skeleton or atlas file");
-      }
+      // 使用 Spine 的 AssetManager 来正确加载资源
+      const assetManager = new this.spineWebGL.AssetManager(this.gl);
 
-      // 2. Load Atlas
+      // 自定义下载器，使用 Blob URL
+      const originalLoad = assetManager.loadText.bind(assetManager);
+      const originalLoadTexture = assetManager.loadTexture.bind(assetManager);
+
+      // 加载 Atlas 文本
       const atlasUrl = this.urls[files.atlas.name];
       const atlasText = await fetch(atlasUrl).then(r => r.text());
 
-      // 3. Create Texture Atlas
-      const textureLoader = async (path: string) => {
-        const filename = path.split('/').pop()!;
-        const blobUrl = this.urls[filename];
-
-        let imageSource: HTMLImageElement | HTMLCanvasElement;
-
-        if (!blobUrl) {
-          console.warn(`Texture not found: ${path}. Available urls:`, Object.keys(this.urls));
-          const canvas = document.createElement('canvas');
-          canvas.width = 2;
-          canvas.height = 2;
-          const ctx = canvas.getContext('2d');
-          if (ctx) {
-            ctx.fillStyle = '#ff00ff';
-            ctx.fillRect(0, 0, 2, 2);
-          }
-          imageSource = canvas;
-        } else {
-          imageSource = new Image();
-          (imageSource as HTMLImageElement).src = blobUrl;
-          // Wait for image to load to avoid WebGL "no image" error
-          await new Promise((resolve) => {
-            (imageSource as HTMLImageElement).onload = resolve;
-            (imageSource as HTMLImageElement).onerror = resolve; // Continue anyway
-          });
+      // 解析 Atlas 获取纹理文件名
+      const textureNames: string[] = [];
+      const lines = atlasText.split('\n');
+      for (let i = 0; i < lines.length; i++) {
+        const line = lines[i].trim();
+        if (line.endsWith('.png') || line.endsWith('.jpg')) {
+          textureNames.push(line);
         }
-
-        return new this.spineWebGL.GLTexture(this.gl, imageSource);
-      };
-
-      // Since the original TextureAtlas.load is sync but we need async textures,
-      // we have to handle the atlas loading more carefully.
-      // In 3.8, we can manually populate pages.
-      const atlas = new spine.TextureAtlas(atlasText, (path: string) => {
-        // This is a dummy loader because we'll replace textures async
-        return new this.spineWebGL.GLTexture(this.gl, document.createElement('canvas'));
-      });
-
-      // Now asynchronously load the real textures
-      for (const page of atlas.pages) {
-        page.texture = await textureLoader(page.name);
       }
 
-      // Debug: Log regions found in atlas to help identify mismatches
-      console.log(`Atlas loaded. Regions found: ${atlas.regions.length}`, atlas.regions.map((r: any) => r.name).slice(0, 10));
+      // 预加载所有图片并创建 GLTexture
+      const textureMap: Map<string, any> = new Map();
+      const gl = this.gl;
 
-      // 4. Load Skeleton
+      for (const texName of textureNames) {
+        const blobUrl = this.urls[texName] || this.urls[texName.split('/').pop()!];
+
+        if (!blobUrl) {
+          console.warn(`纹理未找到: ${texName}`);
+          continue;
+        }
+
+        // 加载图片
+        const image = new Image();
+        image.crossOrigin = 'anonymous';
+        image.src = blobUrl;
+        await new Promise((resolve, reject) => {
+          image.onload = resolve;
+          image.onerror = reject;
+        });
+        // 创建带正确尺寸的 GLTexture
+        gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
+        gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, true);  // PMA
+
+        const texture = new this.spineWebGL.GLTexture(gl, image);
+        textureMap.set(texName, texture);
+      }
+
+      // 创建 TextureAtlas，同步返回已加载的纹理
+      const atlas = new spine.TextureAtlas(atlasText, (path: string) => {
+        const tex = textureMap.get(path);
+        if (tex) {
+          return tex;
+        }
+
+        const canvas = document.createElement('canvas');
+        canvas.width = 2;
+        canvas.height = 2;
+        return new this.spineWebGL.GLTexture(gl, canvas);
+      });
+
+      // 4. 加载骨骼数据
       const atlasLoader = new spine.AtlasAttachmentLoader(atlas);
       const skelUrl = this.urls[files.skeleton.name];
 
       let skeletonData;
-
       if (files.skeleton.name.endsWith('.json')) {
         const skeletonJson = new spine.SkeletonJson(atlasLoader);
-        // 3.8 has scale property on the instance, 4.0 might differ but usually supports it
         skeletonJson.scale = 1.0;
         const jsonContent = await fetch(skelUrl).then(r => r.json());
         skeletonData = skeletonJson.readSkeletonData(jsonContent);
       } else {
-        // Binary .skel
         const skeletonBinary = new spine.SkeletonBinary(atlasLoader);
         skeletonBinary.scale = 1.0;
         const buffer = await fetch(skelUrl).then(r => r.arrayBuffer());
-
-        // 3.8 Binary Read
         skeletonData = skeletonBinary.readSkeletonData(new Uint8Array(buffer));
       }
 
-      // 5. Setup Skeleton & Animation State
+      // 5. 创建 Skeleton 和 AnimationState
       this.skeleton = new spine.Skeleton(skeletonData);
       this.skeleton.setToSetupPose();
       this.skeleton.updateWorldTransform();
-      console.log("Skeleton instance created.");
 
-      // Calculate bounds
-      // 3.8 API for getBounds might expect different args, but usually (offset, size, tempArray)
+
+      // 6. 计算边界
       const offset = new (this.spineWebGL.Vector2 || spine.Vector2)();
       const size = new (this.spineWebGL.Vector2 || spine.Vector2)();
-
-      // Safety check for getBounds signature
-      if (this.skeleton.getBounds) {
-        this.skeleton.getBounds(offset, size, []);
-      } else {
-        // Fallback for very old versions?
-        offset.set(0, 0);
-        size.set(100, 100);
-      }
+      this.skeleton.getBounds(offset, size, []);
 
       this.bounds = { offset, size };
-      console.log("Bounds calculated:", offset, size);
-
-      // Animation State
+      // 7. 创建动画状态
       const animationStateData = new spine.AnimationStateData(skeletonData);
       this.state = new spine.AnimationState(animationStateData);
 
       const animNames = skeletonData.animations.map((a: any) => a.name);
-      console.log(`Found ${animNames.length} animations:`, animNames);
       return animNames;
-
     } catch (e) {
-      console.error("Failed to load Spine asset:", e);
-      // Rethrow with user-friendly message if possible
-      if (e instanceof Error && e.message.includes("String in string table")) {
-        throw new Error("Version Mismatch: The skeleton file (.skel) is likely version 3.8, but the runtime is incompatible. Please check your Spine version.");
-      }
+      console.error('加载 Spine 资源失败:', e);
       throw e;
     }
   }
 
-  setAnimation(animName: string) {
+  setAnimation(animName: string, loop: boolean = true) {
     if (this.state && this.skeleton) {
       try {
-        this.state.setAnimation(0, animName, true);
+        const entry = this.state.setAnimation(0, animName, loop);
         this.skeleton.setToSetupPose();
+
+        // 立即更新一次以确保 duration 等信息可用
+        this.totalTime = entry.animation.duration;
+        this.currentTime = 0;
       } catch (e) {
-        console.warn(`Animation ${animName} not found`);
+        console.warn(`动画 ${animName} 未找到`);
+      }
+    }
+  }
+
+  seek(time: number) {
+    if (this.state) {
+      const track = this.state.getCurrent(0);
+      if (track) {
+        track.trackTime = time;
+        this.currentTime = time;
+        // Apply immediately to update pose
+        this.state.apply(this.skeleton);
+        this.skeleton.updateWorldTransform();
+      }
+    }
+  }
+
+  /**
+   * 重置当前动画到开头
+   */
+  resetAnimation() {
+    if (this.state) {
+      const track = this.state.getCurrent(0);
+      if (track) {
+        track.trackTime = 0;
+        this.currentTime = 0;
+        this.state.apply(this.skeleton);
+        this.skeleton.updateWorldTransform();
       }
     }
   }
@@ -233,7 +242,7 @@ export class SpineRenderer {
   resize(width: number, height: number) {
     this.canvas.width = width;
     this.canvas.height = height;
-    if (this.gl) this.gl.viewport(0, 0, width, height);
+    this.gl.viewport(0, 0, width, height);
   }
 
   setBackgroundColor(hex: string) {
@@ -252,65 +261,163 @@ export class SpineRenderer {
     this.scale = val;
   }
 
+  // 播放控制
+  isPlaying: boolean = true;
+  timeScale: number = 1.0;
+  private isRunning: boolean = false;
+
+  // 帧率控制
+  targetFPS: number = 60;
+  private frameInterval: number = 1000 / 60;
+  private lastFrameTime: number = 0;
+
   start() {
+    if (this.isRunning) return;
+    this.isRunning = true;
     this.lastTime = Date.now();
-    this.requestId = requestAnimationFrame(() => this.render());
+    this.lastFrameTime = Date.now(); // 初始化帧时间
+    this.renderLoop();
   }
 
   stop() {
+    this.isRunning = false;
     cancelAnimationFrame(this.requestId);
   }
 
-  render() {
-    const now = Date.now();
-    const delta = Math.min((now - this.lastTime) / 1000, 0.033);
-    this.lastTime = now;
+  // 暴露给外部的状态
+  currentTime: number = 0;
+  totalTime: number = 0;
 
+  private renderLoop() {
+    if (!this.isRunning) return;
+
+    const now = Date.now();
+    const elapsed = now - this.lastFrameTime;
+
+    // 帧率限制: 只有当经过的时间超过帧间隔时才更新
+    if (elapsed < this.frameInterval) {
+      this.requestId = requestAnimationFrame(() => this.renderLoop());
+      return;
+    }
+
+    // 计算实际的 delta,考虑帧率限制
+    let delta = elapsed / 1000;
+    this.lastFrameTime = now - (elapsed % this.frameInterval);
+
+    // 限制最大 delta 防止卡顿时飞跃
+    if (delta > 0.1) delta = 0;
+
+    this.updateAndRender(delta);
+
+    this.requestId = requestAnimationFrame(() => this.renderLoop());
+  }
+
+  /**
+   * 手动渲染一帧 (用于导出)
+   * @param delta 秒
+   */
+  public updateAndRender(delta: number) {
     const gl = this.gl;
 
+    // 清除画布
     gl.clearColor(this.bgColor[0], this.bgColor[1], this.bgColor[2], this.bgColor[3]);
     gl.clear(gl.COLOR_BUFFER_BIT);
 
-    if (this.skeleton && this.state && this.bounds) {
-      this.state.update(delta);
-      this.state.apply(this.skeleton);
-      this.skeleton.updateWorldTransform();
+    try {
+      if (this.skeleton && this.state && this.bounds) {
+        if (this.isPlaying) {
+          // 更新动画时间
+          this.state.update(delta * this.timeScale);
+          this.state.apply(this.skeleton);
+          this.skeleton.updateWorldTransform();
+        }
 
-      const centerX = this.bounds.offset.x + this.bounds.size.x / 2;
-      const centerY = this.bounds.offset.y + this.bounds.size.y / 2;
+        // Sync state for UI
+        const track = this.state.getCurrent(0);
+        if (track) {
+          this.currentTime = track.trackTime % track.animation.duration;
+          this.totalTime = track.animation.duration;
+        }
 
-      const baseScale = (this.canvas.height * 0.8) / (this.bounds.size.y || 1); // prevent div/0
-      const finalScale = baseScale * this.scale;
+        // 视口适配逻辑 (Contain 模式)
+        const b = this.bounds;
+        const contentW = b.size.x;
+        const contentH = b.size.y;
+        const centerX = b.offset.x + contentW / 2;
+        const centerY = b.offset.y + contentH / 2;
 
-      this.mvp.ortho2d(0, 0, this.canvas.width, this.canvas.height);
-      this.mvp.translate(this.canvas.width / 2, this.canvas.height / 2, 0);
+        // 画布尺寸
+        const canvasW = this.canvas.width;
+        const canvasH = this.canvas.height;
+        const canvasAspect = canvasW / canvasH;
+        const contentAspect = contentW / contentH;
 
-      // Spine 3.8 Matrix4 might not have .scale, so we multiply the primary diagonal manually
-      // or use identity + multiply if more complex. Since we just did ortho + translate,
-      // it's safe to scale the values directly or implement scale.
-      const v = this.mvp.values;
-      v[0] *= finalScale; // M00
-      v[5] *= finalScale; // M11
-      v[10] *= 1;          // M22
+        let viewW, viewH;
 
-      this.mvp.translate(-centerX, -centerY, 0);
+        // Fit 逻辑: 确保内容完全可见
+        if (canvasAspect > contentAspect) {
+          // 画布更宽 -> 高度撑满，宽度自适应
+          viewH = contentH;
+          viewW = contentH * canvasAspect;
+        } else {
+          // 画布更高 -> 宽度撑满，高度自适应
+          viewW = contentW;
+          viewH = contentW / canvasAspect;
+        }
 
-      this.shader.bind();
-      this.shader.setUniformi(this.spineWebGL.Shader.SAMPLER, 0);
-      this.shader.setUniform4x4f(this.spineWebGL.Shader.MVP_MATRIX, this.mvp.values);
+        // 应用缩放系数
+        const zoom = this.scale;
+        viewW /= zoom;
+        viewH /= zoom;
 
-      this.batcher.begin(this.shader);
-      this.skeletonRenderer.draw(this.batcher, this.skeleton);
-      this.batcher.end();
+        // 计算视口左下角
+        const x = centerX - viewW / 2;
+        const y = centerY - viewH / 2;
+
+        // 设置 MVP 投影
+        this.mvp.ortho2d(x, y, viewW, viewH);
+
+        // 渲染
+        this.shader.bind();
+        this.shader.setUniformi(this.spineWebGL.Shader.SAMPLER, 0);
+        this.shader.setUniform4x4f(this.spineWebGL.Shader.MVP_MATRIX, this.mvp.values);
+
+        this.batcher.begin(this.shader);
+        this.skeletonRenderer.draw(this.batcher, this.skeleton);
+        this.batcher.end();
+        this.shader.unbind();
+
+        const glError = gl.getError();
+        if (glError !== gl.NO_ERROR) {
+          console.error("WebGL Error:", glError);
+        }
+      }
+    } catch (e) {
+      console.error("Render Loop Error:", e);
+      // Reset batcher state if it crashed while drawing
+      if (this.batcher && this.batcher.isDrawing) {
+        try { this.batcher.end(); } catch (e2) { }
+      }
     }
+  }
 
-    this.requestId = requestAnimationFrame(() => this.render());
+  setPaused(paused: boolean) {
+    this.isPlaying = !paused;
+  }
+
+  setPlaybackRate(rate: number) {
+    this.timeScale = rate;
+  }
+
+  setTargetFPS(fps: number) {
+    this.targetFPS = fps;
+    this.frameInterval = 1000 / fps;
+    console.log(`目标帧率设置为: ${fps} FPS, 帧间隔: ${this.frameInterval.toFixed(2)}ms`);
   }
 
   dispose() {
     this.stop();
     revokeAssetUrls(this.urls);
     this.urls = {};
-    // Basic cleanup - full WebGL cleanup is complex
   }
 }

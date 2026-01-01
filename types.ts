@@ -19,7 +19,7 @@ export interface ExportConfig {
   width: number;
   height: number;
   fps: number;
-  format: 'webm';
+  format: 'webm-vp9' | 'webm-vp8' | 'mp4' | 'png-sequence' | 'jpg-sequence' | 'mp4-h264';
   duration: number; // seconds
   scale: number; // 0.1 to 3.0
   backgroundColor: string; // Hex

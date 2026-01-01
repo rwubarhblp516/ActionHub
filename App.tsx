@@ -9,6 +9,7 @@ import { DEFAULT_CONFIG } from './constants';
 import { groupFilesByDirectory } from './services/spineLoader';
 import { SpineRenderer } from './services/spineRenderer';
 import { CanvasRecorder } from './services/recorder';
+import { ExportManager, OffscreenRenderTask } from './services/offscreenRenderer';
 import {
   Activity,
   Play,
@@ -64,67 +65,32 @@ const App: React.FC = () => {
   const updateConfig = useCallback((cfg: Partial<ExportConfig>) => setConfig(prev => ({ ...prev, ...cfg })), []);
 
   const processExportQueue = async () => {
-    if (!rendererRef.current) return;
+    const selectedItems = items.filter(i => selectedIds.has(i.id));
+    if (selectedItems.length === 0) return;
+
     setIsExporting(true);
     abortControllerRef.current = new AbortController();
-    const queue = items.filter(i => selectedIds.has(i.id));
-    const total = queue.length;
-
-    setItems(prev => prev.map(item => selectedIds.has(item.id) ? { ...item, status: 'waiting' } : item));
 
     try {
-      for (let i = 0; i < queue.length; i++) {
-        if (abortControllerRef.current?.signal.aborted) break;
+      const { processExportWithOffscreen } = await import('./services/exportProcessor');
 
-        const item = queue[i];
-        setProgress({ current: i + 1, total, currentName: item.name });
-        setItems(prev => prev.map(p => p.id === item.id ? { ...p, status: 'exporting' } : p));
-
-        // Update active item and wait briefly for UI sync
-        setActiveItemId(item.id);
-        await new Promise(r => setTimeout(r, 200));
-
-        console.log(`Exporting ${item.name}...`);
-        const animations = await rendererRef.current.load(item.files);
-        const animToPlay = animations.length > 0 ? animations[0] : null;
-
-        if (animToPlay) {
-          rendererRef.current.resize(config.width, config.height);
-          rendererRef.current.setAnimation(animToPlay);
-
-          // Wait for first few frames to render
-          await new Promise(r => setTimeout(r, 300));
-
-          const recorder = new CanvasRecorder(rendererRef.current.canvas, config.fps);
-          recorder.start(config.fps, config.width, config.height);
-
-          await new Promise(resolve => {
-            const timeout = setTimeout(resolve, config.duration * 1000);
-            abortControllerRef.current?.signal.addEventListener('abort', () => {
-              clearTimeout(timeout);
-              resolve(null);
-            });
-          });
-
-          if (abortControllerRef.current?.signal.aborted) {
-            await recorder.stop();
-            break;
+      await processExportWithOffscreen(
+        selectedItems,
+        config,
+        {
+          onProgress: (current, total, currentName) => {
+            setProgress({ current, total, currentName });
+          },
+          onItemStatusChange: (itemId, status) => {
+            setItems(prev => prev.map(item =>
+              item.id === itemId ? { ...item, status } : item
+            ));
           }
-
-          const blob = await recorder.stop();
-          const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
-          CanvasRecorder.download(blob, `${item.name}_${animToPlay}_${timestamp}.webm`);
-
-          setItems(prev => prev.map(p => p.id === item.id ? { ...p, status: 'completed' } : p));
-          console.log(`Download triggered for ${item.name}`);
-        } else {
-          console.error(`No animations found for ${item.name}`);
-          setItems(prev => prev.map(p => p.id === item.id ? { ...p, status: 'failed' } : p));
-        }
-        await new Promise(r => setTimeout(r, 500));
-      }
+        },
+        abortControllerRef.current.signal
+      );
     } catch (error) {
-      console.error("Export failure:", error);
+      console.error("导出失败:", error);
       alert(`渲染失败: ${error instanceof Error ? error.message : String(error)}`);
     } finally {
       setIsExporting(false);
