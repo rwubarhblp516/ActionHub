@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
+import { motion } from 'framer-motion';
 import { AnimationItem, ExportConfig } from '../types';
 import { SpineRenderer } from '../services/spineRenderer';
 import { Maximize, ZoomIn, ZoomOut, Crosshair, Play, Loader2, AlertCircle, RefreshCw, WifiOff } from 'lucide-react';
@@ -12,26 +13,23 @@ interface PreviewAreaProps {
 
 // 候选 CDN 列表，按优先级排序
 const SPINE_CDN_URLS = [
-    // jsDelivr 通常在国内速度较快且稳定
-    "https://cdn.jsdelivr.net/npm/spine-ts@3.8.75/dist/spine-webgl.js",
-    // 备用版本 (3.8.99 是 3.8 系列的最后一个版本，通常向下兼容)
-    "https://cdn.jsdelivr.net/npm/spine-ts@3.8.99/dist/spine-webgl.js",
-    // unpkg 备用
-    "https://unpkg.com/spine-ts@3.8.75/dist/spine-webgl.js"
+  "/libs/spine-webgl.js", // 优先使用本地下载的版本，确保稳定性
+  "https://fastly.jsdelivr.net/gh/EsotericSoftware/spine-runtimes@3.8/spine-ts/build/spine-webgl.js",
+  "https://jsd.cdn.zzko.cn/gh/EsotericSoftware/spine-runtimes@3.8/spine-ts/build/spine-webgl.js"
 ];
 
-export const PreviewArea: React.FC<PreviewAreaProps> = ({ 
-  activeItem, 
-  config, 
+export const PreviewArea: React.FC<PreviewAreaProps> = ({
+  activeItem,
+  config,
   onUpdateConfig,
-  onRendererReady 
+  onRendererReady
 }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const rendererRef = useRef<SpineRenderer | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const [animations, setAnimations] = useState<string[]>([]);
   const [currentAnim, setCurrentAnim] = useState<string>('');
-  
+
   const [spineState, setSpineState] = useState<'loading' | 'ready' | 'error'>('loading');
   const [loadingMessage, setLoadingMessage] = useState('正在初始化...');
 
@@ -40,42 +38,42 @@ export const PreviewArea: React.FC<PreviewAreaProps> = ({
     // 如果已经加载过，不再重复加载
     // @ts-ignore
     if (typeof window.spine !== 'undefined') {
-        setSpineState('ready');
-        return;
+      setSpineState('ready');
+      return;
     }
 
     let isMounted = true;
-    
+
     const loadScript = (url: string): Promise<void> => {
-        return new Promise((resolve, reject) => {
-            const script = document.createElement('script');
-            script.src = url;
-            script.async = true;
-            script.onload = () => resolve();
-            script.onerror = () => reject(new Error(`Failed to load ${url}`));
-            document.body.appendChild(script);
-        });
+      return new Promise((resolve, reject) => {
+        const script = document.createElement('script');
+        script.src = url;
+        script.async = true;
+        script.onload = () => resolve();
+        script.onerror = () => reject(new Error(`Failed to load ${url}`));
+        document.body.appendChild(script);
+      });
     };
 
     const initSpine = async () => {
-        for (let i = 0; i < SPINE_CDN_URLS.length; i++) {
-            if (!isMounted) return;
-            const url = SPINE_CDN_URLS[i];
-            setLoadingMessage(`正在加载引擎 (尝试源 ${i + 1}/${SPINE_CDN_URLS.length})...`);
-            
-            try {
-                await loadScript(url);
-                // 简单的验证
-                // @ts-ignore
-                if (typeof window.spine !== 'undefined') {
-                    if (isMounted) setSpineState('ready');
-                    return;
-                }
-            } catch (e) {
-                console.warn(`Source ${url} failed, trying next...`);
-            }
+      for (let i = 0; i < SPINE_CDN_URLS.length; i++) {
+        if (!isMounted) return;
+        const url = SPINE_CDN_URLS[i];
+        setLoadingMessage(`正在加载引擎 (尝试源 ${i + 1}/${SPINE_CDN_URLS.length})...`);
+
+        try {
+          await loadScript(url);
+          // 简单的验证
+          // @ts-ignore
+          if (typeof window.spine !== 'undefined') {
+            if (isMounted) setSpineState('ready');
+            return;
+          }
+        } catch (e) {
+          console.warn(`Source ${url} failed, trying next...`);
         }
-        if (isMounted) setSpineState('error');
+      }
+      if (isMounted) setSpineState('error');
     };
 
     initSpine();
@@ -96,6 +94,12 @@ export const PreviewArea: React.FC<PreviewAreaProps> = ({
     try {
       const renderer = new SpineRenderer(canvasRef.current);
       rendererRef.current = renderer;
+
+      // 立即应用初始配置
+      const previewBg = config.backgroundColor === 'transparent' ? 'transparent' : config.backgroundColor;
+      renderer.setBackgroundColor(previewBg);
+      renderer.setScale(config.scale);
+
       renderer.start();
       onRendererReady(renderer);
     } catch (e) {
@@ -104,7 +108,7 @@ export const PreviewArea: React.FC<PreviewAreaProps> = ({
       setLoadingMessage("引擎初始化失败: WebGL 可能不可用");
       setSpineState('error');
     }
-    
+
     // Cleanup
     return () => {
       rendererRef.current?.dispose();
@@ -115,10 +119,10 @@ export const PreviewArea: React.FC<PreviewAreaProps> = ({
   // Handle Resize
   useEffect(() => {
     const handleResize = () => {
-        if (containerRef.current && rendererRef.current) {
-            const { width, height } = containerRef.current.getBoundingClientRect();
-            rendererRef.current.resize(width, height);
-        }
+      if (containerRef.current && rendererRef.current) {
+        const { width, height } = containerRef.current.getBoundingClientRect();
+        rendererRef.current.resize(width, height);
+      }
     };
     window.addEventListener('resize', handleResize);
     handleResize(); // Initial
@@ -128,167 +132,183 @@ export const PreviewArea: React.FC<PreviewAreaProps> = ({
   // Update Renderer Settings
   useEffect(() => {
     if (!rendererRef.current) return;
-    rendererRef.current.setBackgroundColor(config.backgroundColor);
+    // Ensure the preview can show the grid if chose transparent or if we want clarity
+    const previewBg = config.backgroundColor === 'transparent' ? 'transparent' : config.backgroundColor;
+    rendererRef.current.setBackgroundColor(previewBg);
     rendererRef.current.setScale(config.scale);
-  }, [config.backgroundColor, config.scale, spineState]);
+  }, [config.backgroundColor, config.scale]);
 
   // Load Asset when active item changes
   useEffect(() => {
     const loadAsset = async () => {
-      if (activeItem && rendererRef.current) {
-        setAnimations([]);
-        try {
-          const anims = await rendererRef.current.load(activeItem.files);
-          setAnimations(anims);
-          if (anims.length > 0) {
-              setCurrentAnim(anims[0]);
-              rendererRef.current.setAnimation(anims[0]);
-          }
-        } catch (e) {
-          console.error("Load failed", e);
-          // 可以在这里添加 Toast 提示加载失败
+      if (!activeItem || !rendererRef.current) return;
+
+      console.log("PreviewArea: Loading asset", activeItem.name);
+      setAnimations([]);
+      try {
+        const anims = await rendererRef.current.load(activeItem.files);
+        setAnimations(anims);
+        if (anims.length > 0) {
+          const defaultAnim = anims[0];
+          setCurrentAnim(defaultAnim);
+          rendererRef.current.setAnimation(defaultAnim);
+          console.log("PreviewArea: Set default animation", defaultAnim);
         }
+      } catch (e) {
+        console.error("PreviewArea: Load failure", e);
       }
     };
     loadAsset();
   }, [activeItem, spineState]);
 
   return (
-    <div className="flex-1 flex flex-col relative bg-gray-950 overflow-hidden">
-      {/* Top Toolbar: Animations & Controls */}
-      <div className="h-14 bg-gray-800 border-b border-gray-700 flex items-center px-4 justify-between shrink-0 z-20 shadow-sm">
-        <div className="flex items-center gap-4">
+    <div className="flex-1 flex flex-col h-full bg-transparent overflow-hidden">
+      {/* Top Toolbar: Studio Controls */}
+      <div className="h-14 bg-black/70 backdrop-blur-3xl border-b border-white/10 flex items-center px-6 justify-between shrink-0 z-20 shadow-xl">
+        <div className="flex items-center gap-6">
           <div className="flex flex-col gap-1">
-            <span className="text-[10px] text-gray-400 uppercase font-bold tracking-wider">当前动画</span>
+            <span className="text-[9px] text-white/60 uppercase font-black tracking-[0.25em]">当前动画 (Current Animation)</span>
             <div className="relative group">
-                <select 
+              <select
                 value={currentAnim}
                 onChange={(e) => {
-                    setCurrentAnim(e.target.value);
-                    rendererRef.current?.setAnimation(e.target.value);
+                  setCurrentAnim(e.target.value);
+                  rendererRef.current?.setAnimation(e.target.value);
                 }}
                 disabled={!activeItem || animations.length === 0}
-                className="appearance-none bg-gray-700 text-white text-sm border border-gray-600 hover:border-indigo-500 rounded px-3 py-1 pr-8 min-w-[160px] focus:outline-none focus:ring-1 focus:ring-indigo-500 transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                    {animations.length === 0 ? (
-                        <option>等待加载...</option>
-                    ) : (
-                        animations.map(a => <option key={a} value={a} className="bg-gray-800">{a}</option>)
-                    )}
-                </select>
-                {/* Custom arrow icon */}
-                <div className="absolute right-2 top-1/2 -translate-y-1/2 pointer-events-none text-gray-400">
-                    <svg width="10" height="6" viewBox="0 0 10 6" fill="none" xmlns="http://www.w3.org/2000/svg">
-                        <path d="M1 1L5 5L9 1" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
-                    </svg>
-                </div>
+                className="appearance-none bg-white/[0.08] text-white text-[11px] font-black border border-white/20 hover:border-white/30 rounded-lg px-4 py-1.5 pr-10 min-w-[220px] focus:outline-none focus:ring-1 focus:ring-indigo-500/50 transition-all cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed group-hover:bg-white/[0.12] shadow-inner"
+              >
+                {animations.length === 0 ? (
+                  <option className="bg-neutral-950">暂无工程资产</option>
+                ) : (
+                  animations.map(a => <option key={a} value={a} className="bg-neutral-950">{a}</option>)
+                )}
+              </select>
+              <div className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none text-white/40 group-hover:text-white/80 transition-colors">
+                <svg width="10" height="6" viewBox="0 0 10 6" fill="none" xmlns="http://www.w3.org/2000/svg">
+                  <path d="M1 1L5 5L9 1" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+              </div>
+            </div>
+          </div>
+
+          <div className="w-px h-8 bg-white/10 mx-2" />
+
+          {/* Stats Display */}
+          <div className="flex flex-col gap-1">
+            <span className="text-[9px] text-white/60 uppercase font-black tracking-[0.25em]">视口同步状态 (Sync)</span>
+            <div className="flex items-center gap-3">
+              <div className="flex items-center gap-2 text-emerald-400">
+                <div className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse shadow-[0_0_10px_rgba(52,211,153,0.5)]" />
+                <span className="text-[10px] font-black uppercase tracking-widest text-white/90">实时渲染引擎就绪</span>
+              </div>
             </div>
           </div>
         </div>
 
-        <div className="flex items-center gap-2 bg-gray-900/50 p-1 rounded-lg border border-gray-700/50">
-            {/* Visual Helpers Toggle */}
-            <button className="p-1.5 hover:bg-gray-700 rounded text-gray-400 hover:text-white transition-colors" title="显示中心线">
-                <Crosshair size={16} />
-            </button>
-            <div className="h-4 w-px bg-gray-700 mx-1"></div>
-            
-            <button 
-                onClick={() => onUpdateConfig({ scale: Math.max(0.1, config.scale - 0.1) })}
-                className="p-1.5 hover:bg-gray-700 rounded text-gray-400 hover:text-white transition-colors"
-                title="缩小"
+        <div className="flex items-center gap-2 bg-white/[0.05] p-1.5 rounded-xl border border-white/10 shadow-inner">
+          <div className="flex items-center gap-1">
+            <button
+              onClick={() => onUpdateConfig({ scale: Math.max(0.1, config.scale - 0.1) })}
+              className="p-2 hover:bg-white/10 rounded-lg text-white/60 hover:text-white transition-all active:scale-95 group"
+              title="缩小"
             >
-                <ZoomOut size={16} />
+              <ZoomOut size={16} className="group-hover:scale-110 transition-transform" />
             </button>
-            <span className="text-xs w-10 text-center text-gray-300 font-mono select-none">{Math.round(config.scale * 100)}%</span>
-            <button 
-                onClick={() => onUpdateConfig({ scale: Math.min(3.0, config.scale + 1) })}
-                className="p-1.5 hover:bg-gray-700 rounded text-gray-400 hover:text-white transition-colors"
-                title="放大"
+
+            <div className="px-3 min-w-[60px] text-center border-x border-white/5">
+              <span className="text-[11px] text-white font-mono font-black select-none tracking-tighter">{Math.round(config.scale * 100)}%</span>
+            </div>
+
+            <button
+              onClick={() => onUpdateConfig({ scale: Math.min(5.0, config.scale + 0.1) })}
+              className="p-2 hover:bg-white/10 rounded-lg text-white/60 hover:text-white transition-all active:scale-95 group"
+              title="放大"
             >
-                <ZoomIn size={16} />
+              <ZoomIn size={16} className="group-hover:scale-110 transition-transform" />
             </button>
-            <button 
-                onClick={() => onUpdateConfig({ scale: 1.0 })}
-                className="p-1.5 hover:bg-gray-700 rounded text-gray-400 hover:text-indigo-400 ml-1 transition-colors" 
-                title="重置 100%"
-            >
-                <Maximize size={16} />
-            </button>
+          </div>
+
+          <div className="w-px h-5 bg-white/10 mx-1"></div>
+
+          <button
+            onClick={() => onUpdateConfig({ scale: 1.0 })}
+            className="p-2 hover:bg-white/10 rounded-lg text-white/60 hover:text-indigo-400 transition-all active:scale-90"
+            title="重置缩放"
+          >
+            <Maximize size={16} />
+          </button>
         </div>
       </div>
 
-      {/* Canvas Area */}
-      <div ref={containerRef} className="flex-1 relative bg-gray-900 overflow-hidden flex items-center justify-center">
-        {/* Grid Background Pattern */}
-        <div 
-          className="absolute inset-0 opacity-[0.03] pointer-events-none"
-          style={{
-            backgroundImage: `linear-gradient(#ffffff 1px, transparent 1px), linear-gradient(90deg, #ffffff 1px, transparent 1px)`,
-            backgroundSize: '40px 40px'
-          }}
+      {/* Canvas 视口区域 */}
+      <div
+        ref={containerRef}
+        className="flex-1 relative overflow-hidden"
+        style={{
+          backgroundColor: config.backgroundColor === 'transparent' ? undefined : config.backgroundColor,
+          // 透明时显示棋盘格背景以便清晰看到透明效果
+          backgroundImage: config.backgroundColor === 'transparent'
+            ? 'linear-gradient(45deg, #1a1b26 25%, transparent 25%), linear-gradient(-45deg, #1a1b26 25%, transparent 25%), linear-gradient(45deg, transparent 75%, #1a1b26 75%), linear-gradient(-45deg, transparent 75%, #1a1b26 75%)'
+            : undefined,
+          backgroundSize: config.backgroundColor === 'transparent' ? '20px 20px' : undefined,
+          backgroundPosition: config.backgroundColor === 'transparent' ? '0 0, 0 10px, 10px -10px, -10px 0px' : undefined
+        }}
+      >
+        {/* WebGL Canvas */}
+        <canvas
+          ref={canvasRef}
+          className="absolute inset-0 w-full h-full"
+          style={{ outline: 'none' }}
         />
-        <div 
-          className="absolute inset-0 opacity-[0.05] pointer-events-none"
-          style={{
-            backgroundImage: `linear-gradient(#ffffff 1px, transparent 1px), linear-gradient(90deg, #ffffff 1px, transparent 1px)`,
-            backgroundSize: '200px 200px'
-          }}
-        />
-        
-        {/* Center Crosshair (Visual helper) */}
-        <div className="absolute inset-0 pointer-events-none flex items-center justify-center opacity-20">
-            <div className="w-full h-px bg-indigo-500 absolute"></div>
-            <div className="h-full w-px bg-indigo-500 absolute"></div>
-        </div>
 
-        {/* The WebGL Canvas */}
-        <canvas 
-            ref={canvasRef} 
-            className="block shadow-2xl shadow-black/50"
-            // Style handles visual size, internal resolution handled by resize logic
-            style={{ maxWidth: '100%', maxHeight: '100%', outline: 'none' }}
-        />
-        
         {spineState === 'loading' && (
-             <div className="absolute inset-0 flex flex-col items-center justify-center bg-gray-900/95 backdrop-blur-sm z-50 text-gray-400">
-                <Loader2 className="animate-spin text-indigo-500 mb-2" size={32} />
-                <p>{loadingMessage}</p>
-             </div>
+          <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/90 backdrop-blur-2xl z-50 text-white/70">
+            <div className="relative">
+              <Loader2 className="animate-spin text-indigo-500 mb-10" size={64} strokeWidth={1} />
+              <div className="absolute inset-0 animate-ping opacity-30 bg-indigo-500 rounded-full scale-150 blur-3xl" />
+            </div>
+            <p className="text-[13px] font-black tracking-[0.4em] uppercase opacity-90">{loadingMessage}</p>
+          </div>
         )}
 
         {spineState === 'error' && (
-             <div className="absolute inset-0 flex flex-col items-center justify-center bg-gray-900/95 backdrop-blur-sm z-50 text-gray-400">
-                <WifiOff className="text-red-500 mb-4" size={48} />
-                <p className="text-xl font-bold text-gray-200 mb-2">Spine 引擎加载失败</p>
-                <div className="bg-gray-800 p-4 rounded-lg mb-6 max-w-md text-sm text-left border border-gray-700">
-                    <p className="mb-2 text-red-300">无法连接到 CDN 服务器。</p>
-                    <p className="text-gray-400 mb-2">我们尝试了以下源但都失败了：</p>
-                    <ul className="list-disc list-inside text-gray-500 text-xs font-mono mb-2">
-                        <li>cdn.jsdelivr.net (3.8.75)</li>
-                        <li>cdn.jsdelivr.net (3.8.99)</li>
-                        <li>unpkg.com</li>
-                    </ul>
-                    <p className="text-gray-400">请检查您的网络连接。</p>
-                </div>
-                <button 
-                    onClick={handleRetryLoad}
-                    className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-500 text-white px-6 py-3 rounded-lg transition-colors font-medium shadow-lg shadow-indigo-500/20"
-                >
-                    <RefreshCw size={18} />
-                    重新加载页面
-                </button>
-             </div>
+          <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/95 backdrop-blur-3xl z-50 p-12 overflow-y-auto">
+            <div className="w-28 h-28 rounded-[48px] bg-red-500/10 flex items-center justify-center mb-12 border border-red-500/20 shadow-2xl shadow-red-500/20">
+              <WifiOff className="text-red-500" size={56} />
+            </div>
+            <p className="text-4xl font-black text-white mb-6 tracking-tight">连接协议异常</p>
+            <p className="text-white/60 max-w-sm text-center mb-12 text-base leading-relaxed">环境初始化过程中发生冲突，无法稳定加载 Spine WebGL 运行时环境。</p>
+
+            <button
+              onClick={handleRetryLoad}
+              className="group flex items-center gap-5 bg-white text-black px-12 py-6 rounded-3xl transition-all font-black uppercase text-[12px] tracking-widest hover:scale-105 active:scale-95 shadow-2xl shadow-white/20"
+            >
+              <RefreshCw size={20} className="group-hover:rotate-180 transition-transform duration-700" />
+              重新建立协议连接
+            </button>
+          </div>
         )}
 
         {spineState === 'ready' && !activeItem && (
-            <div className="absolute inset-0 flex flex-col items-center justify-center bg-gray-900/90 backdrop-blur-sm z-10 text-gray-400 select-none">
-                 <div className="w-16 h-16 rounded-2xl bg-gray-800 flex items-center justify-center mb-4 shadow-lg border border-gray-700">
-                    <Play className="text-gray-600 fill-current ml-1" size={32} />
-                 </div>
-                <p className="text-lg font-medium text-gray-300">准备就绪</p>
-                <p className="text-sm text-gray-500 mt-2">请从左侧列表选择动画进行预览</p>
-            </div>
+          <div className="absolute inset-0 flex flex-col items-center justify-center z-20 select-none">
+            <motion.div
+              initial={{ y: 20, opacity: 0 }}
+              animate={{ y: 0, opacity: 1 }}
+              className="flex flex-col items-center"
+            >
+              <div className="w-32 h-32 rounded-[48px] bg-gradient-to-br from-indigo-500/30 to-transparent flex items-center justify-center mb-12 shadow-2xl border border-white/20 backdrop-blur-2xl group-hover:scale-110 transition-transform">
+                <div className="w-16 h-16 rounded-2xl bg-indigo-500/40 flex items-center justify-center border border-indigo-500/30">
+                  <Play className="text-indigo-300 fill-indigo-300/40 translate-x-1" size={42} strokeWidth={1.5} />
+                </div>
+              </div>
+              <h3 className="text-4xl font-black text-white mb-6 tracking-tight">等待资产管道就绪</h3>
+              <div className="flex items-center gap-5 bg-white/[0.06] px-8 py-3.5 rounded-full border border-white/10 shadow-2xl backdrop-blur-md">
+                <div className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse shadow-[0_0_15px_rgba(52,211,153,0.8)]" />
+                <span className="text-[12px] font-black uppercase tracking-[0.25em] text-white/90">请从左侧资源管线选取一个动画项目</span>
+              </div>
+            </motion.div>
+          </div>
         )}
       </div>
     </div>

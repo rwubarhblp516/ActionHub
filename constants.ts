@@ -7,7 +7,7 @@ export const DEFAULT_CONFIG: ExportConfig = {
   format: 'webm',
   duration: 5,
   scale: 1.0,
-  backgroundColor: '#2a2a40',
+  backgroundColor: 'transparent',
 };
 
 export const RESOLUTION_PRESETS = [
