@@ -19,7 +19,9 @@ export class SpineRenderer {
   batcher: any = null;
   mvp: any = null;
   skeletonRenderer: any = null;
+  shapesShader: any = null; // Debug
   shapeRenderer: any = null; // Debug
+  skeletonDebugRenderer: any = null; // Debug
 
   skeleton: any = null;
   state: any = null;
@@ -34,6 +36,19 @@ export class SpineRenderer {
   // 配置
   bgColor: number[] = [0, 1, 0, 1]; // 默认绿幕 #00FF00
   scale: number = 1.0;
+  debugEnabled: boolean = false;
+  private debugOptions = {
+    drawBones: true,
+    drawRegionAttachments: false,
+    drawBoundingBoxes: true,
+    drawMeshHull: false,
+    drawMeshTriangles: false,
+    drawPaths: false,
+    drawClipping: false,
+    drawSkeletonXY: false,
+  };
+  private setupPoseMode: boolean = false;
+  private wasPlayingBeforeSetup: boolean = true;
 
   // Spine 3.8 兼容层
   spineWebGL: any = null;
@@ -76,6 +91,15 @@ export class SpineRenderer {
     if (typeof this.skeletonRenderer.premultipliedAlpha !== 'undefined') {
       this.skeletonRenderer.premultipliedAlpha = true;
     }
+
+    // Debug Renderers
+    this.shapesShader = this.spineWebGL.Shader.newColored(gl);
+    this.shapeRenderer = new this.spineWebGL.ShapeRenderer(gl);
+    this.skeletonDebugRenderer = new this.spineWebGL.SkeletonDebugRenderer(gl);
+    if (typeof this.skeletonDebugRenderer.premultipliedAlpha !== 'undefined') {
+      this.skeletonDebugRenderer.premultipliedAlpha = true;
+    }
+
     console.log('[SpineRenderer] 初始化完成, premultipliedAlpha: true');
   }
 
@@ -196,6 +220,7 @@ export class SpineRenderer {
       try {
         const entry = this.state.setAnimation(0, animName, loop);
         this.skeleton.setToSetupPose();
+        this.setupPoseMode = false;
 
         // 立即更新一次以确保 duration 等信息可用
         this.totalTime = entry.animation.duration;
@@ -316,11 +341,12 @@ export class SpineRenderer {
   }
 
   seek(time: number) {
-    if (this.state) {
+    if (this.state && this.skeleton) {
       const track = this.state.getCurrent(0);
       if (track) {
         track.trackTime = time;
         this.currentTime = time;
+        this.skeleton.setToSetupPose();
         this.state.apply(this.skeleton);
         this.skeleton.updateWorldTransform();
       }
@@ -328,11 +354,12 @@ export class SpineRenderer {
   }
 
   resetAnimation() {
-    if (this.state) {
+    if (this.state && this.skeleton) {
       const track = this.state.getCurrent(0);
       if (track) {
         track.trackTime = 0;
         this.currentTime = 0;
+        this.skeleton.setToSetupPose();
         this.state.apply(this.skeleton);
         this.skeleton.updateWorldTransform();
       }
@@ -400,7 +427,7 @@ export class SpineRenderer {
 
     let delta = elapsed / 1000;
     this.lastFrameTime = now - (elapsed % this.frameInterval);
-    if (delta > 0.1) delta = 0;
+    if (delta > 0.1) delta = 0.1;
 
     this.updateAndRender(delta);
     this.requestId = requestAnimationFrame(() => this.renderLoop());
@@ -413,8 +440,19 @@ export class SpineRenderer {
 
     try {
       if (this.skeleton && this.state && this.bounds) {
-        if (this.isPlaying) {
+        if (this.setupPoseMode) {
+          this.skeleton.setToSetupPose();
+          this.skeleton.updateWorldTransform();
+          this.currentTime = 0;
+          this.totalTime = 0;
+        } else if (this.isPlaying) {
           this.state.update(delta * this.timeScale);
+          this.skeleton.setToSetupPose();
+          this.state.apply(this.skeleton);
+          this.skeleton.updateWorldTransform();
+        } else {
+          // 暂停时也要以 setup pose 为基底，避免拖拽跳转/切动画时残留状态导致“变形”
+          this.skeleton.setToSetupPose();
           this.state.apply(this.skeleton);
           this.skeleton.updateWorldTransform();
         }
@@ -463,6 +501,25 @@ export class SpineRenderer {
         this.skeletonRenderer.draw(this.batcher, this.skeleton);
         this.batcher.end();
         this.shader.unbind();
+
+        if (this.debugEnabled && this.shapeRenderer && this.shapesShader && this.skeletonDebugRenderer) {
+          this.skeletonDebugRenderer.drawBones = this.debugOptions.drawBones;
+          this.skeletonDebugRenderer.drawRegionAttachments = this.debugOptions.drawRegionAttachments;
+          this.skeletonDebugRenderer.drawBoundingBoxes = this.debugOptions.drawBoundingBoxes;
+          this.skeletonDebugRenderer.drawMeshHull = this.debugOptions.drawMeshHull;
+          this.skeletonDebugRenderer.drawMeshTriangles = this.debugOptions.drawMeshTriangles;
+          this.skeletonDebugRenderer.drawPaths = this.debugOptions.drawPaths;
+          this.skeletonDebugRenderer.drawClipping = this.debugOptions.drawClipping;
+          this.skeletonDebugRenderer.drawSkeletonXY = this.debugOptions.drawSkeletonXY;
+          this.skeletonDebugRenderer.premultipliedAlpha = true;
+
+          this.shapesShader.bind();
+          this.shapesShader.setUniform4x4f(this.spineWebGL.Shader.MVP_MATRIX, this.mvp.values);
+          this.shapeRenderer.begin(this.shapesShader);
+          this.skeletonDebugRenderer.draw(this.shapeRenderer, this.skeleton, null);
+          this.shapeRenderer.end();
+          this.shapesShader.unbind();
+        }
       }
     } catch (e) {
       console.error("Render Loop Error:", e);
@@ -474,6 +531,37 @@ export class SpineRenderer {
 
   setPaused(paused: boolean) {
     this.isPlaying = !paused;
+  }
+
+  setSetupPoseMode(enabled: boolean) {
+    if (!this.skeleton || !this.state) {
+      this.setupPoseMode = enabled;
+      return;
+    }
+    if (enabled === this.setupPoseMode) return;
+
+    this.setupPoseMode = enabled;
+    if (enabled) {
+      this.wasPlayingBeforeSetup = this.isPlaying;
+      this.isPlaying = false;
+      if (typeof this.state.setEmptyAnimation === 'function') {
+        this.state.setEmptyAnimation(0, 0);
+      }
+      this.skeleton.setToSetupPose();
+      this.skeleton.updateWorldTransform();
+      this.currentTime = 0;
+      this.totalTime = 0;
+    } else {
+      this.isPlaying = this.wasPlayingBeforeSetup;
+    }
+  }
+
+  setDebugEnabled(enabled: boolean) {
+    this.debugEnabled = enabled;
+  }
+
+  setDebugOptions(options: Partial<typeof this.debugOptions>) {
+    this.debugOptions = { ...this.debugOptions, ...options };
   }
 
   setPlaybackRate(rate: number) {

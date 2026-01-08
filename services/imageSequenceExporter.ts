@@ -1,9 +1,7 @@
 /**
  * 图片序列导出器
- * 用于导出PNG/JPG序列,兼容EbSynth等工具
+ * 用于导出 PNG/JPG 序列（由上层负责打包与目录结构）
  */
-
-import JSZip from 'jszip';
 
 export class ImageSequenceExporter {
     private canvas: HTMLCanvasElement;
@@ -42,27 +40,10 @@ export class ImageSequenceExporter {
         });
     }
 
-    async stop(): Promise<Blob> {
+    async stop(): Promise<Blob[]> {
         this.isRecording = false;
-
-        console.log(`图片序列打包中: ${this.frames.length} 帧`);
-
-        // 打包成ZIP
-        const zip = new JSZip();
-
-        this.frames.forEach((blob, index) => {
-            const frameNumber = String(index).padStart(5, '0');
-            const ext = this.format === 'png' ? 'png' : 'jpg';
-            zip.file(`frame_${frameNumber}.${ext}`, blob);
-        });
-
-        // 生成ZIP
-        const zipBlob = await zip.generateAsync({
-            type: 'blob',
-            compression: 'STORE' // 图片本身已压缩，ZIP层使用STORE更快
-        });
-
-        return zipBlob;
+        console.log(`图片序列捕获完成: ${this.frames.length} 帧`);
+        return this.frames;
     }
 
     getFrameCount(): number {

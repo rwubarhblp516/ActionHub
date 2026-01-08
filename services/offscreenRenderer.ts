@@ -24,6 +24,16 @@ export interface OffscreenRenderTask {
     abortSignal?: AbortSignal; // 中断信号
 }
 
+export type OffscreenRenderOutput =
+    | { kind: 'frames'; frames: Blob[]; imageExt: 'png' | 'jpg' }
+    | { kind: 'video'; blob: Blob };
+
+export interface OffscreenRenderResult {
+    output: OffscreenRenderOutput;
+    totalFrames: number;
+    durationSeconds: number;
+}
+
 export class OffscreenRenderer {
     private canvas: HTMLCanvasElement;
     private renderer: SpineRenderer;
@@ -38,7 +48,7 @@ export class OffscreenRenderer {
         this.renderer = new SpineRenderer(this.canvas);
     }
 
-    async renderToVideo(task: OffscreenRenderTask): Promise<Blob> {
+    async renderToVideo(task: OffscreenRenderTask): Promise<OffscreenRenderResult> {
         const { assetName, animation, files, width, height, fps, format, duration, backgroundColor, abortSignal } = task;
 
         console.log(`[离屏渲染] 开始: ${assetName} - ${animation}`);
@@ -82,7 +92,7 @@ export class OffscreenRenderer {
             const frameDelta = 1 / fps;
 
             // 根据格式选择导出器
-            let blob: Blob;
+            let output: OffscreenRenderOutput;
             const isImageSequence = format === 'png-sequence' || format === 'jpg-sequence';
             const isMP4H264 = format === 'mp4-h264';
 
@@ -98,7 +108,12 @@ export class OffscreenRenderer {
                     await exporter.capture();
                 }
 
-                blob = await exporter.stop();
+                const frames = await exporter.stop();
+                output = {
+                    kind: 'frames',
+                    frames,
+                    imageExt: format === 'png-sequence' ? 'png' : 'jpg',
+                };
             } else if (isMP4H264) {
                 if (!isWebCodecsSupported()) {
                     throw new Error('浏览器不支持 WebCodecs API,请使用 Chrome 94+ 或 Edge 94+');
@@ -114,7 +129,8 @@ export class OffscreenRenderer {
                     await mp4Recorder.encodeFrame((i * 1000000) / fps);
                 }
 
-                blob = await mp4Recorder.stop();
+                const blob = await mp4Recorder.stop();
+                output = { kind: 'video', blob };
             } else {
                 const recorder = new CanvasRecorder(this.canvas, fps, format as VideoFormat);
                 recorder.start(fps, width, height);
@@ -125,13 +141,18 @@ export class OffscreenRenderer {
                     await new Promise(resolve => setTimeout(resolve, 10));
                 }
 
-                blob = await recorder.stop();
+                const blob = await recorder.stop();
+                output = { kind: 'video', blob };
             }
 
             this.renderer.stop();
             console.log(`[离屏渲染] 完成: ${assetName} - ${animation}`);
 
-            return blob;
+            return {
+                output,
+                totalFrames,
+                durationSeconds: recordDuration,
+            };
         } catch (error) {
             this.renderer.stop();
             throw error;
@@ -151,11 +172,11 @@ export class ExportManager {
     private activeRenderers: Set<OffscreenRenderer> = new Set();
     private queue: Array<{
         task: OffscreenRenderTask;
-        resolve: (blob: Blob) => void;
+        resolve: (result: OffscreenRenderResult) => void;
         reject: (error: Error) => void;
     }> = [];
 
-    async exportTask(task: OffscreenRenderTask): Promise<Blob> {
+    async exportTask(task: OffscreenRenderTask): Promise<OffscreenRenderResult> {
         return new Promise((resolve, reject) => {
             this.queue.push({ task, resolve, reject });
             this.processQueue();
@@ -179,8 +200,8 @@ export class ExportManager {
         this.activeRenderers.add(renderer);
 
         try {
-            const blob = await renderer.renderToVideo(item.task);
-            item.resolve(blob);
+            const result = await renderer.renderToVideo(item.task);
+            item.resolve(result);
         } catch (error) {
             item.reject(error as Error);
         } finally {

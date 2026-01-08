@@ -1,7 +1,7 @@
-import React from 'react';
+import React, { useRef, useState } from 'react';
 import { ExportConfig } from '../types';
 import { RESOLUTION_PRESETS, FPS_PRESETS } from '../constants';
-import { Settings, Film, Clock, Monitor, Download, Palette, Layers, ChevronRight, Zap, Loader2 } from 'lucide-react';
+import { Settings, Film, Clock, Monitor, Download, Palette, Layers, ChevronRight, Zap, Loader2, FileText, X } from 'lucide-react';
 
 interface ExportPanelProps {
   config: ExportConfig;
@@ -24,6 +24,26 @@ export const ExportPanel: React.FC<ExportPanelProps> = ({
   totalItems,
   hideHeader = false
 }) => {
+  const [manifestError, setManifestError] = useState<string | null>(null);
+  const manifestInputRef = useRef<HTMLInputElement | null>(null);
+
+  const manifestMappingsCount = Object.keys(config.naming.manifest?.mappings || {}).length;
+
+  const loadManifestFile = async (file: File) => {
+    setManifestError(null);
+    try {
+      const text = await file.text();
+      const manifest = JSON.parse(text);
+      onUpdate({
+        naming: {
+          ...config.naming,
+          manifest
+        }
+      });
+    } catch (e) {
+      setManifestError(e instanceof Error ? e.message : String(e));
+    }
+  };
 
   const handleResolutionPreset = (width: number, height: number) => {
     onUpdate({ width, height });
@@ -158,6 +178,145 @@ export const ExportPanel: React.FC<ExportPanelProps> = ({
                   </div>
                 </button>
               ))}
+            </div>
+          </div>
+
+          {/* Section: ActionHub Naming */}
+          <div className="flex flex-col gap-5">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="w-9 h-9 rounded-2xl bg-white/[0.05] flex items-center justify-center border border-white/10 shadow-lg">
+                  <Layers size={16} className="text-indigo-400" />
+                </div>
+                <div className="flex flex-col gap-1">
+                  <span className="text-[11px] text-white font-black uppercase tracking-widest">ActionHub 命名规范</span>
+                  <span className="text-[9px] text-white/40 font-bold">导出目录 + metadata/derived</span>
+                </div>
+              </div>
+
+              <button
+                onClick={() => onUpdate({ naming: { ...config.naming, enabled: !config.naming.enabled } })}
+                className={`px-4 py-1.5 rounded-xl text-[9px] font-black uppercase tracking-widest border transition-all ${config.naming.enabled
+                  ? 'bg-indigo-500 text-white border-indigo-400 shadow-[0_0_15px_rgba(99,102,241,0.4)]'
+                  : 'bg-white/5 text-white/40 border-white/10 hover:border-white/20'
+                  }`}
+              >
+                {config.naming.enabled ? 'Enabled' : 'Disabled'}
+              </button>
+            </div>
+
+            <div className={`flex flex-col gap-4 p-4 rounded-3xl border bg-white/[0.03] ${config.naming.enabled ? 'border-white/10' : 'border-white/5 opacity-60'}`}>
+              <div className="grid grid-cols-2 gap-3">
+                <div className="flex flex-col gap-2">
+                  <span className="text-[9px] text-white/50 font-black uppercase tracking-widest">View</span>
+                  <select
+                    value={config.naming.view}
+                    onChange={(e) => onUpdate({ naming: { ...config.naming, view: e.target.value as any } })}
+                    disabled={!config.naming.enabled}
+                    className="bg-black/40 border border-white/10 rounded-xl px-3 py-2 text-[11px] text-white font-mono font-bold focus:outline-none focus:ring-1 focus:ring-indigo-500/50 disabled:opacity-40"
+                  >
+                    <option value="VIEW_SIDE">VIEW_SIDE</option>
+                    <option value="VIEW_TOP">VIEW_TOP</option>
+                    <option value="VIEW_ISO45">VIEW_ISO45</option>
+                  </select>
+                </div>
+
+                <div className="flex flex-col gap-2">
+                  <span className="text-[9px] text-white/50 font-black uppercase tracking-widest">Category Default</span>
+                  <input
+                    value={config.naming.defaultCategory}
+                    onChange={(e) => onUpdate({ naming: { ...config.naming, defaultCategory: e.target.value } })}
+                    disabled={!config.naming.enabled}
+                    className="bg-black/40 border border-white/10 rounded-xl px-3 py-2 text-[11px] text-white font-mono font-bold focus:outline-none focus:ring-1 focus:ring-indigo-500/50 disabled:opacity-40"
+                    placeholder="locomotion / combat / misc"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div className="flex flex-col gap-2">
+                  <span className="text-[9px] text-white/50 font-black uppercase tracking-widest">Dir Default</span>
+                  <select
+                    value={config.naming.defaultDir}
+                    onChange={(e) => onUpdate({ naming: { ...config.naming, defaultDir: e.target.value as any } })}
+                    disabled={!config.naming.enabled}
+                    className="bg-black/40 border border-white/10 rounded-xl px-3 py-2 text-[11px] text-white font-mono font-bold focus:outline-none focus:ring-1 focus:ring-indigo-500/50 disabled:opacity-40"
+                  >
+                    <option value="none">none</option>
+                    <option value="LR">LR</option>
+                    <option value="4dir">4dir</option>
+                    <option value="8dir">8dir</option>
+                  </select>
+                </div>
+
+                <div className="flex flex-col gap-2">
+                  <span className="text-[9px] text-white/50 font-black uppercase tracking-widest">Type Default</span>
+                  <select
+                    value={config.naming.defaultType}
+                    onChange={(e) => onUpdate({ naming: { ...config.naming, defaultType: e.target.value as any } })}
+                    disabled={!config.naming.enabled}
+                    className="bg-black/40 border border-white/10 rounded-xl px-3 py-2 text-[11px] text-white font-mono font-bold focus:outline-none focus:ring-1 focus:ring-indigo-500/50 disabled:opacity-40"
+                  >
+                    <option value="once">once</option>
+                    <option value="loop">loop</option>
+                  </select>
+                </div>
+              </div>
+
+              <div className="flex items-center justify-between gap-3">
+                <div className="flex flex-col gap-1">
+                  <span className="text-[10px] text-white/70 font-black uppercase tracking-widest">Manifest (可选)</span>
+                  <span className="text-[9px] text-white/40 font-bold">
+                    mappings key: `资产名::动画名`（或直接 `动画名`）
+                  </span>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <input
+                    ref={manifestInputRef}
+                    type="file"
+                    accept=".json,application/json"
+                    className="hidden"
+                    onChange={(e) => {
+                      const f = e.target.files?.[0];
+                      if (f) loadManifestFile(f);
+                      e.currentTarget.value = '';
+                    }}
+                  />
+
+                  <button
+                    onClick={() => manifestInputRef.current?.click()}
+                    disabled={!config.naming.enabled}
+                    className="px-3 py-2 rounded-xl bg-white/5 border border-white/10 text-[10px] font-black uppercase tracking-widest text-white/70 hover:bg-white/10 hover:border-white/20 transition-all disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-2"
+                    title="导入 manifest.json"
+                  >
+                    <FileText size={14} className="text-indigo-400" />
+                    导入
+                  </button>
+
+                  {config.naming.manifest && (
+                    <button
+                      onClick={() => onUpdate({ naming: { ...config.naming, manifest: undefined } })}
+                      disabled={!config.naming.enabled}
+                      className="p-2 rounded-xl bg-white/5 border border-white/10 text-white/60 hover:text-white hover:bg-white/10 hover:border-white/20 transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+                      title="清除 manifest"
+                    >
+                      <X size={14} />
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              <div className="flex items-center justify-between text-[10px] font-black uppercase tracking-widest">
+                <span className="text-white/50">Manifest: {config.naming.manifest ? 'Loaded' : 'None'}</span>
+                <span className="text-indigo-400 font-mono">{config.naming.manifest ? `${manifestMappingsCount} mappings` : ''}</span>
+              </div>
+
+              {manifestError && (
+                <div className="text-[10px] font-bold text-red-300 bg-red-500/10 border border-red-500/20 rounded-2xl p-3">
+                  manifest 解析失败: {manifestError}
+                </div>
+              )}
             </div>
           </div>
 

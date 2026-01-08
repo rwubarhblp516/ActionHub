@@ -5,9 +5,16 @@ export const DEFAULT_CONFIG: ExportConfig = {
   height: 1080,
   fps: 30,
   format: 'png-sequence',
-  duration: 5,
+  duration: 0,
   scale: 1.0,
   backgroundColor: 'transparent',
+  naming: {
+    enabled: true,
+    view: 'VIEW_SIDE',
+    defaultCategory: 'misc',
+    defaultDir: 'none',
+    defaultType: 'once',
+  },
 };
 
 export const RESOLUTION_PRESETS = [

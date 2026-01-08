@@ -1,15 +1,17 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { motion } from 'framer-motion';
 import { AnimationItem, ExportConfig } from '../types';
 import { SpineRenderer } from '../services/spineRenderer';
-import { Maximize, ZoomIn, ZoomOut, Crosshair, Play, Loader2, AlertCircle, RefreshCw, WifiOff, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Maximize, ZoomIn, ZoomOut, Crosshair, Play, Loader2, AlertCircle, RefreshCw, WifiOff, ChevronLeft, ChevronRight, FileText, Layers } from 'lucide-react';
 import { ProgressBar } from './ProgressBar';
+import { normalizeCanonicalName } from '../services/actionHubNaming';
 
 interface PreviewAreaProps {
   activeItem: AnimationItem | null;
   config: ExportConfig;
   onUpdateConfig: (cfg: Partial<ExportConfig>) => void;
   onRendererReady: (renderer: SpineRenderer) => void;
+  onAnimationsLoaded?: (itemId: string, animationNames: string[]) => void;
 }
 
 // Spine 3.8 运行时 CDN 列表
@@ -23,7 +25,8 @@ export const PreviewArea: React.FC<PreviewAreaProps> = ({
   activeItem,
   config,
   onUpdateConfig,
-  onRendererReady
+  onRendererReady,
+  onAnimationsLoaded
 }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const rendererRef = useRef<SpineRenderer | null>(null);
@@ -31,9 +34,28 @@ export const PreviewArea: React.FC<PreviewAreaProps> = ({
   const [animations, setAnimations] = useState<string[]>([]);
   const [currentAnim, setCurrentAnim] = useState<string>('');
   const [isPlaying, setIsPlaying] = useState<boolean>(true);
+  const [showSkeleton, setShowSkeleton] = useState<boolean>(false);
+  const [setupPose, setSetupPose] = useState<boolean>(false);
 
   const [spineState, setSpineState] = useState<'loading' | 'ready' | 'error'>('loading');
   const [loadingMessage, setLoadingMessage] = useState('正在初始化...');
+
+  const resizeToContainer = useCallback(() => {
+    if (!containerRef.current || !rendererRef.current || !canvasRef.current) return;
+    const rect = containerRef.current.getBoundingClientRect();
+    if (rect.width <= 0 || rect.height <= 0) return;
+
+    // 使用 devicePixelRatio 提升清晰度，并保证 WebGL viewport 与 CSS 尺寸同步，避免拖拽布局时“拉伸变形”
+    const dpr = window.devicePixelRatio || 1;
+    const cssW = Math.floor(rect.width);
+    const cssH = Math.floor(rect.height);
+    const pixelW = Math.max(1, Math.floor(rect.width * dpr));
+    const pixelH = Math.max(1, Math.floor(rect.height * dpr));
+
+    canvasRef.current.style.width = `${cssW}px`;
+    canvasRef.current.style.height = `${cssH}px`;
+    rendererRef.current.resize(pixelW, pixelH);
+  }, []);
 
   // 动态加载 Spine 3.8 运行时
   useEffect(() => {
@@ -85,6 +107,46 @@ export const PreviewArea: React.FC<PreviewAreaProps> = ({
     window.location.reload();
   };
 
+  const downloadJson = (data: any, filename: string) => {
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
+
+  const handleExportManifestTemplate = () => {
+    if (!activeItem || animations.length === 0) return;
+
+    const assetKey = activeItem.files.basePath || activeItem.name;
+    const mappings: Record<string, any> = {};
+    animations.forEach(anim => {
+      const key = `${assetKey}::${anim}`;
+      const suggestedName = normalizeCanonicalName(
+        anim.includes('/') ? anim : `${config.naming.defaultCategory}/${anim}`
+      );
+      mappings[key] = { name: suggestedName };
+    });
+
+    const manifest = {
+      version: '1.0',
+      generated_date: new Date().toISOString(),
+      defaults: {
+        view: config.naming.view,
+        category: config.naming.defaultCategory,
+        dir: config.naming.defaultDir,
+        type: config.naming.defaultType,
+      },
+      mappings,
+    };
+
+    downloadJson(manifest, `manifest_${activeItem.name}.json`);
+  };
+
   // Initialize Renderer once Spine is ready
   useEffect(() => {
     if (spineState !== 'ready' || !canvasRef.current || rendererRef.current) return;
@@ -99,13 +161,8 @@ export const PreviewArea: React.FC<PreviewAreaProps> = ({
       renderer.setScale(config.scale);
       renderer.setTargetFPS(config.fps); // 设置初始帧率
 
-      // 立即设置正确的 canvas 尺寸
-      if (containerRef.current) {
-        const { width, height } = containerRef.current.getBoundingClientRect();
-        if (width > 0 && height > 0) {
-          renderer.resize(width, height);
-        }
-      }
+      // 立即设置正确的 canvas 尺寸（面板拖拽不会触发 window resize，因此后续使用 ResizeObserver 持续同步）
+      resizeToContainer();
 
       renderer.start();
       onRendererReady(renderer);
@@ -123,18 +180,18 @@ export const PreviewArea: React.FC<PreviewAreaProps> = ({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [spineState]);
 
-  // Handle Resize
+  // Handle Resize (包括面板拖拽导致的容器尺寸变化)
   useEffect(() => {
-    const handleResize = () => {
-      if (containerRef.current && rendererRef.current) {
-        const { width, height } = containerRef.current.getBoundingClientRect();
-        rendererRef.current.resize(width, height);
-      }
-    };
-    window.addEventListener('resize', handleResize);
-    handleResize(); // Initial
-    return () => window.removeEventListener('resize', handleResize);
-  }, [spineState]);
+    if (!containerRef.current) return;
+    const el = containerRef.current;
+
+    // ResizeObserver 能覆盖 PanelDivider 改变布局但不触发 window resize 的情况
+    const ro = new ResizeObserver(() => resizeToContainer());
+    ro.observe(el);
+    resizeToContainer();
+
+    return () => ro.disconnect();
+  }, [resizeToContainer, spineState]);
 
   // Update Renderer Settings
   useEffect(() => {
@@ -143,22 +200,32 @@ export const PreviewArea: React.FC<PreviewAreaProps> = ({
     const previewBg = config.backgroundColor === 'transparent' ? 'transparent' : config.backgroundColor;
     rendererRef.current.setBackgroundColor(previewBg);
     rendererRef.current.setScale(config.scale);
-  }, [config.backgroundColor, config.scale]);
+    rendererRef.current.setTargetFPS(config.fps);
+    rendererRef.current.setDebugEnabled(showSkeleton);
+  }, [config.backgroundColor, config.scale, config.fps, showSkeleton]);
 
   // Load Asset when active item changes
   useEffect(() => {
     const loadAsset = async () => {
-      if (!activeItem || !rendererRef.current) return;
+      if (!activeItem) {
+        setAnimations([]);
+        setCurrentAnim('');
+        setSetupPose(false);
+        return;
+      }
+      if (!rendererRef.current || spineState !== 'ready') return;
 
       console.log("PreviewArea: Loading asset", activeItem.name);
       setAnimations([]);
       try {
         const anims = await rendererRef.current.load(activeItem.files);
         setAnimations(anims);
+        onAnimationsLoaded?.(activeItem.id, anims);
         if (anims.length > 0) {
           const defaultAnim = anims[0];
           setCurrentAnim(defaultAnim);
           rendererRef.current.setAnimation(defaultAnim);
+          setSetupPose(false);
           console.log("PreviewArea: Set default animation", defaultAnim);
         }
       } catch (e) {
@@ -166,7 +233,7 @@ export const PreviewArea: React.FC<PreviewAreaProps> = ({
       }
     };
     loadAsset();
-  }, [activeItem, spineState]);
+  }, [activeItem?.id, spineState]);
 
   // 键盘快捷键: 左右箭头切换动画
   useEffect(() => {
@@ -181,12 +248,14 @@ export const PreviewArea: React.FC<PreviewAreaProps> = ({
         const prevAnim = animations[prevIndex];
         setCurrentAnim(prevAnim);
         rendererRef.current?.setAnimation(prevAnim);
+        setSetupPose(false);
       } else if (e.key === 'ArrowRight') {
         e.preventDefault();
         const nextIndex = currentIndex < animations.length - 1 ? currentIndex + 1 : 0;
         const nextAnim = animations[nextIndex];
         setCurrentAnim(nextAnim);
         rendererRef.current?.setAnimation(nextAnim);
+        setSetupPose(false);
       }
     };
 
@@ -207,6 +276,7 @@ export const PreviewArea: React.FC<PreviewAreaProps> = ({
                 onChange={(e) => {
                   setCurrentAnim(e.target.value);
                   rendererRef.current?.setAnimation(e.target.value);
+                  setSetupPose(false);
                 }}
                 disabled={!activeItem || animations.length === 0}
                 className="appearance-none bg-white/[0.08] text-white text-[11px] font-black border border-white/20 hover:border-white/30 rounded-lg px-4 py-1.5 pr-10 min-w-[220px] focus:outline-none focus:ring-1 focus:ring-indigo-500/50 transition-all cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed group-hover:bg-white/[0.12] shadow-inner"
@@ -240,6 +310,54 @@ export const PreviewArea: React.FC<PreviewAreaProps> = ({
         </div>
 
         <div className="flex items-center gap-2 bg-white/[0.05] p-1.5 rounded-xl border border-white/10 shadow-inner">
+          <button
+            onClick={() => {
+              const next = !showSkeleton;
+              setShowSkeleton(next);
+              rendererRef.current?.setDebugEnabled(next);
+            }}
+            disabled={!activeItem}
+            className={`px-3 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all flex items-center gap-2 ${showSkeleton
+              ? 'bg-indigo-500 text-white'
+              : 'bg-white/5 text-white/60 hover:text-white hover:bg-white/10'
+              } disabled:opacity-30 disabled:cursor-not-allowed`}
+            title="骨骼/包围盒调试预览"
+          >
+            <Layers size={14} className={showSkeleton ? 'text-white' : 'text-indigo-400'} />
+            骨架
+          </button>
+
+          <button
+            onClick={() => {
+              const next = !setupPose;
+              setSetupPose(next);
+              rendererRef.current?.setSetupPoseMode(next);
+              if (!next && currentAnim) {
+                rendererRef.current?.setAnimation(currentAnim);
+              }
+            }}
+            disabled={!activeItem}
+            className={`px-3 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all ${setupPose
+              ? 'bg-white text-black'
+              : 'bg-white/5 text-white/60 hover:text-white hover:bg-white/10'
+              } disabled:opacity-30 disabled:cursor-not-allowed`}
+            title="Setup Pose（用于骨架/绑定检查）"
+          >
+            Setup
+          </button>
+
+          <button
+            onClick={handleExportManifestTemplate}
+            disabled={!activeItem || animations.length === 0}
+            className="px-3 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all bg-white/5 text-white/60 hover:text-white hover:bg-white/10 disabled:opacity-30 disabled:cursor-not-allowed flex items-center gap-2"
+            title="导出当前资产的 manifest 模板（动作模板映射）"
+          >
+            <FileText size={14} className="text-indigo-400" />
+            Manifest
+          </button>
+
+          <div className="w-px h-5 bg-white/10 mx-1"></div>
+
           <div className="flex items-center gap-1">
             <button
               onClick={() => onUpdateConfig({ scale: Math.max(0.1, config.scale - 0.1) })}
@@ -299,6 +417,7 @@ export const PreviewArea: React.FC<PreviewAreaProps> = ({
                 const prevAnim = animations[prevIndex];
                 setCurrentAnim(prevAnim);
                 rendererRef.current?.setAnimation(prevAnim);
+                setSetupPose(false);
               }}
               disabled={animations.length <= 1}
               className="w-8 h-8 rounded-full bg-white/10 text-white flex items-center justify-center hover:bg-white/20 active:scale-95 transition-all disabled:opacity-30 disabled:cursor-not-allowed"
@@ -332,6 +451,7 @@ export const PreviewArea: React.FC<PreviewAreaProps> = ({
                 const nextAnim = animations[nextIndex];
                 setCurrentAnim(nextAnim);
                 rendererRef.current?.setAnimation(nextAnim);
+                setSetupPose(false);
               }}
               disabled={animations.length <= 1}
               className="w-8 h-8 rounded-full bg-white/10 text-white flex items-center justify-center hover:bg-white/20 active:scale-95 transition-all disabled:opacity-30 disabled:cursor-not-allowed"

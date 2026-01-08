@@ -1,6 +1,13 @@
-import React, { ReactNode } from 'react';
+import React, { ReactNode, useEffect, useId, useRef, useState } from 'react';
 import { motion } from 'framer-motion';
 import { MoreVertical } from 'lucide-react';
+
+export interface PanelMenuItem {
+    label: string;
+    onClick: () => void;
+    disabled?: boolean;
+    danger?: boolean;
+}
 
 interface PanelProps {
     title: string;
@@ -10,6 +17,7 @@ interface PanelProps {
     flex?: number;
     minWidth?: number;
     className?: string;
+    menuItems?: PanelMenuItem[];
 }
 
 export const EditorPanel: React.FC<PanelProps> = ({
@@ -19,8 +27,35 @@ export const EditorPanel: React.FC<PanelProps> = ({
     height,
     flex,
     minWidth = 200,
-    className = ""
+    className = "",
+    menuItems
 }) => {
+    const [menuOpen, setMenuOpen] = useState(false);
+    const menuId = useId();
+    const menuButtonRef = useRef<HTMLButtonElement | null>(null);
+    const menuRef = useRef<HTMLDivElement | null>(null);
+
+    useEffect(() => {
+        if (!menuOpen) return;
+        const onDown = (e: MouseEvent) => {
+            const t = e.target as Node;
+            if (menuRef.current?.contains(t)) return;
+            if (menuButtonRef.current?.contains(t)) return;
+            setMenuOpen(false);
+        };
+        window.addEventListener('mousedown', onDown);
+        return () => window.removeEventListener('mousedown', onDown);
+    }, [menuOpen]);
+
+    useEffect(() => {
+        if (!menuOpen) return;
+        const onKey = (e: KeyboardEvent) => {
+            if (e.key === 'Escape') setMenuOpen(false);
+        };
+        window.addEventListener('keydown', onKey);
+        return () => window.removeEventListener('keydown', onKey);
+    }, [menuOpen]);
+
     return (
         <motion.div
             initial={{ opacity: 0, scale: 0.98 }}
@@ -45,9 +80,45 @@ export const EditorPanel: React.FC<PanelProps> = ({
                     <span className="text-[11px] font-black text-white uppercase tracking-[0.3em] opacity-90">{title}</span>
                 </div>
                 <div className="flex items-center gap-2">
-                    <button className="text-white/40 hover:text-white transition-all p-2 hover:bg-white/10 rounded-xl active:scale-90 group">
+                    <button
+                        ref={menuButtonRef}
+                        onClick={() => setMenuOpen(v => !v)}
+                        aria-haspopup="menu"
+                        aria-expanded={menuOpen}
+                        aria-controls={menuId}
+                        className="text-white/40 hover:text-white transition-all p-2 hover:bg-white/10 rounded-xl active:scale-90 group"
+                    >
                         <MoreVertical size={16} className="group-hover:rotate-90 transition-transform duration-300" />
                     </button>
+
+                    {menuOpen && (menuItems && menuItems.length > 0) && (
+                        <div
+                            ref={menuRef}
+                            id={menuId}
+                            role="menu"
+                            className="absolute top-12 right-4 w-56 bg-[#0b0c10]/95 backdrop-blur-2xl border border-white/10 rounded-2xl shadow-2xl overflow-hidden z-50"
+                        >
+                            <div className="py-2">
+                                {menuItems.map((item, idx) => (
+                                    <button
+                                        key={`${item.label}-${idx}`}
+                                        role="menuitem"
+                                        disabled={item.disabled}
+                                        onClick={() => {
+                                            setMenuOpen(false);
+                                            item.onClick();
+                                        }}
+                                        className={`w-full text-left px-4 py-2.5 text-[11px] font-black uppercase tracking-widest transition-all ${item.danger
+                                            ? 'text-red-200 hover:bg-red-500/10'
+                                            : 'text-white/70 hover:text-white hover:bg-white/10'
+                                            } disabled:opacity-30 disabled:cursor-not-allowed`}
+                                    >
+                                        {item.label}
+                                    </button>
+                                ))}
+                            </div>
+                        </div>
+                    )}
                 </div>
             </div>
 

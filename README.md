@@ -29,6 +29,8 @@ ActionHub is a Vite + React + TypeScript app for previewing Spine assets and exp
 ## Asset Standards (ActionHub)
 The ActionHub standards and schemas live under `docs/actionhub/`:
 - Naming and directory rules: `docs/actionhub/standards/naming_rules.md`
+- Naming manifest (optional): `docs/actionhub/standards/naming_manifest.md`
+- Template library guide: `docs/actionhub/standards/template_library_guide.md`
 - UE batch checklist: `docs/actionhub/standards/ue_batch_checklist.md`
 - UE view profiles: `docs/actionhub/standards/ue_view_profiles.md`
 - Metadata schema: `docs/actionhub/schemas/metadata_schema.json`

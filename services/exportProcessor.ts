@@ -6,12 +6,70 @@ import JSZip from 'jszip';
 import { AnimationItem, ExportConfig } from '../types';
 import { SpineRenderer } from './spineRenderer';
 import { CanvasRecorder } from './recorder';
-import { ExportManager, OffscreenRenderTask } from './offscreenRenderer';
+import { ExportManager, OffscreenRenderResult, OffscreenRenderTask } from './offscreenRenderer';
+import { buildDerivedPaths, guessDeliveryFromFormat, inferActionSpec } from './actionHubNaming';
 
 export interface ExportCallbacks {
     onProgress: (current: number, total: number, currentName: string) => void;
     onItemStatusChange: (itemId: string, status: 'waiting' | 'exporting' | 'completed' | 'failed') => void;
 }
+
+const buildDerivedMetadata = (params: {
+    canonicalName: string;
+    view: string;
+    assetId: string;
+    fps: number;
+    frames: number;
+    type: 'loop' | 'once';
+    dir: string;
+}) => {
+    const { canonicalName, view, assetId, fps, frames, type, dir } = params;
+    return {
+        version: '1.0',
+        name: canonicalName,
+        master: {
+            standard_skeleton: 'UE_Manny',
+            asset_id: assetId
+        },
+        timing: {
+            fps,
+            frames,
+            type,
+            loop: type === 'loop',
+            root_motion: 'n/a'
+        },
+        directions: {
+            dir_set: dir
+        },
+        views: {
+            [view]: {
+                direction_set: dir
+            }
+        },
+        tags: [],
+        events: []
+    };
+};
+
+const guessVideoExt = (blob: Blob) => {
+    const t = (blob.type || '').toLowerCase();
+    if (t.includes('webm')) return 'webm';
+    return 'mp4';
+};
+
+const addFramesToZip = (params: {
+    zip: JSZip;
+    dirPath: string;
+    imageExt: 'png' | 'jpg';
+    frames: Blob[];
+}) => {
+    const { zip, dirPath, imageExt, frames } = params;
+    const pad = Math.max(4, String(Math.max(0, frames.length - 1)).length);
+    frames.forEach((blob, index) => {
+        const name = String(index).padStart(pad, '0');
+        zip.file(`${dirPath}/${name}.${imageExt}`, blob);
+    });
+};
 
 export async function processExportWithOffscreen(
     selectedItems: AnimationItem[],
@@ -78,6 +136,7 @@ export async function processExportWithOffscreen(
 
         // 第二步: 处理所有任务
         let completed = 0;
+        const exportIndex: any[] = [];
 
         // 我们使用一个简单的 promise 队列来控制并发, exportManager 内部已经有了 maxConcurrent
         const exportPromises = tasks.map(async ({ item, animation, task }, index) => {
@@ -91,29 +150,93 @@ export async function processExportWithOffscreen(
                 console.log(`[导出] [${index + 1}/${totalTasks}] 开始渲染: ${taskName}`);
 
                 // 使用离屏渲染器导出
-                const blob = await exportManager.exportTask(task);
+                const result: OffscreenRenderResult = await exportManager.exportTask(task);
 
                 if (abortSignal?.aborted) return;
 
-                // 确定文件名
-                let ext: string;
-                if (config.format === 'png-sequence' || config.format === 'jpg-sequence') {
-                    ext = 'zip';
-                } else if (config.format === 'mp4-h264') {
-                    ext = 'mp4';
+                if (config.naming?.enabled) {
+                    const delivery = guessDeliveryFromFormat(config.format);
+                    const spec = inferActionSpec({
+                        assetName: item.name,
+                        assetKey: item.files.basePath || item.name,
+                        animationName: animation,
+                        naming: config.naming
+                    });
+
+                    const derived = buildDerivedPaths({
+                        spec,
+                        delivery,
+                        fps: config.fps,
+                        frames: result.totalFrames,
+                        outputExt: result.output.kind === 'video' ? guessVideoExt(result.output.blob) : undefined,
+                        framesExt: result.output.kind === 'frames' ? result.output.imageExt : undefined
+                    });
+
+                    if (result.output.kind === 'video' && derived.outputFilePath) {
+                        zip.file(derived.outputFilePath, result.output.blob);
+                    } else if (result.output.kind === 'frames' && derived.outputDirPath) {
+                        addFramesToZip({
+                            zip,
+                            dirPath: derived.outputDirPath,
+                            imageExt: result.output.imageExt,
+                            frames: result.output.frames
+                        });
+                    }
+
+                    // metadata/derived
+                    const metadata = buildDerivedMetadata({
+                        canonicalName: spec.canonicalName,
+                        view: spec.view,
+                        assetId: `spine:${item.files.basePath || item.name}`,
+                        fps: config.fps,
+                        frames: result.totalFrames,
+                        type: spec.type,
+                        dir: spec.dir
+                    });
+                    zip.file(derived.metadataPath, JSON.stringify(metadata, null, 2));
+
+                    exportIndex.push({
+                        asset: item.name,
+                        animation,
+                        delivery: derived.delivery,
+                        view: derived.view,
+                        canonicalName: derived.canonicalName,
+                        output: derived.outputFilePath || derived.outputDirPath,
+                        metadata: derived.metadataPath,
+                        fps: config.fps,
+                        frames: result.totalFrames
+                    });
                 } else {
-                    ext = config.format.startsWith('webm') ? 'webm' : 'mp4';
+                    // Legacy: 保持旧命名（每个动画一个文件；图片序列仍打包成 zip）
+                    let ext: string;
+                    if (result.output.kind === 'frames') {
+                        ext = 'zip';
+                    } else {
+                        ext = guessVideoExt(result.output.blob);
+                    }
+
+                    const filename = `${item.name}_${animation}.${ext}`;
+
+                    if (result.output.kind === 'video') {
+                        zip.file(filename, result.output.blob);
+                    } else {
+                        const seqZip = new JSZip();
+                        result.output.frames.forEach((blob, frameIndex) => {
+                            const frameNumber = String(frameIndex).padStart(5, '0');
+                            seqZip.file(`frame_${frameNumber}.${result.output.imageExt}`, blob);
+                        });
+                        const seqZipBlob = await seqZip.generateAsync({
+                            type: 'blob',
+                            compression: 'STORE'
+                        });
+                        zip.file(filename, seqZipBlob);
+                    }
                 }
-
-                const filename = `${item.name}_${animation}.${ext}`;
-
-                // 将结果添加到主 ZIP 中
-                zip.file(filename, blob);
 
                 completed++;
                 onProgress(completed, totalTasks, taskName);
 
-                console.log(`[导出] ✓ [${completed}/${totalTasks}] 渲染完成并已添加至打包队列: ${filename}`);
+                console.log(`[导出] ✓ [${completed}/${totalTasks}] 渲染完成并已添加至打包队列`);
             } catch (error) {
                 console.error(`[导出] 渲染失败: ${item.name} - ${animation}`, error);
                 onItemStatusChange(item.id, 'failed');
@@ -131,6 +254,14 @@ export async function processExportWithOffscreen(
 
             const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
             const zipFilename = `SpineExport_${timestamp}.zip`;
+
+            if (config.naming?.enabled) {
+                zip.file('export_index.json', JSON.stringify({
+                    version: '1.0',
+                    generated_date: new Date().toISOString(),
+                    items: exportIndex
+                }, null, 2));
+            }
 
             const finalZipBlob = await zip.generateAsync({
                 type: 'blob',
