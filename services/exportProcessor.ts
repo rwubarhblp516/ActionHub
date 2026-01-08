@@ -8,6 +8,7 @@ import { SpineRenderer } from './spineRenderer';
 import { CanvasRecorder } from './recorder';
 import { ExportManager, OffscreenRenderResult, OffscreenRenderTask } from './offscreenRenderer';
 import { buildDerivedPaths, guessDeliveryFromFormat, inferActionSpec } from './actionHubNaming';
+import { packFramesToAtlas } from './atlasPacker';
 
 export interface ExportCallbacks {
     onProgress: (current: number, total: number, currentName: string) => void;
@@ -69,6 +70,30 @@ const addFramesToZip = (params: {
         const name = String(index).padStart(pad, '0');
         zip.file(`${dirPath}/${name}.${imageExt}`, blob);
     });
+};
+
+const addAtlasToZip = async (params: {
+    zip: JSZip;
+    basePath: string; // without extension
+    frames: Blob[];
+    maxSize: number;
+    padding: number;
+    trim: boolean;
+}) => {
+    const { zip, basePath, frames, maxSize, padding, trim } = params;
+    const baseName = basePath.split('/').pop() || 'atlas';
+    const pages = await packFramesToAtlas({
+        frames,
+        baseName,
+        options: { maxSize, padding, trim }
+    });
+    pages.forEach((p) => {
+        const imageSuffix = p.imageFileName.slice(baseName.length).replace(/\.png$/i, '');
+        const jsonSuffix = p.jsonFileName.slice(baseName.length).replace(/\.json$/i, '');
+        zip.file(`${basePath}${imageSuffix}.png`, p.imageBlob);
+        zip.file(`${basePath}${jsonSuffix}.json`, JSON.stringify(p.json, null, 2));
+    });
+    return pages.length;
 };
 
 export async function processExportWithOffscreen(
@@ -174,13 +199,37 @@ export async function processExportWithOffscreen(
 
                     if (result.output.kind === 'video' && derived.outputFilePath) {
                         zip.file(derived.outputFilePath, result.output.blob);
-                    } else if (result.output.kind === 'frames' && derived.outputDirPath) {
-                        addFramesToZip({
-                            zip,
-                            dirPath: derived.outputDirPath,
-                            imageExt: result.output.imageExt,
-                            frames: result.output.frames
-                        });
+                    } else if (result.output.kind === 'frames' && derived.outputBasePath) {
+                        const useAtlas = config.spritePackaging === 'atlas' && result.output.imageExt === 'png';
+                        if (useAtlas) {
+                            const pagesCount = await addAtlasToZip({
+                                zip,
+                                basePath: derived.outputBasePath,
+                                frames: result.output.frames,
+                                maxSize: config.atlasMaxSize,
+                                padding: config.atlasPadding,
+                                trim: config.atlasTrim
+                            });
+                            exportIndex.push({
+                                asset: item.name,
+                                animation,
+                                delivery: derived.delivery,
+                                view: derived.view,
+                                canonicalName: derived.canonicalName,
+                                output: `${derived.outputBasePath}.png`,
+                                atlasPages: pagesCount,
+                                metadata: derived.metadataPath,
+                                fps: config.fps,
+                                frames: result.totalFrames
+                            });
+                        } else {
+                            addFramesToZip({
+                                zip,
+                                dirPath: derived.outputBasePath,
+                                imageExt: result.output.imageExt,
+                                frames: result.output.frames
+                            });
+                        }
                     }
 
                     // metadata/derived
@@ -195,17 +244,19 @@ export async function processExportWithOffscreen(
                     });
                     zip.file(derived.metadataPath, JSON.stringify(metadata, null, 2));
 
-                    exportIndex.push({
-                        asset: item.name,
-                        animation,
-                        delivery: derived.delivery,
-                        view: derived.view,
-                        canonicalName: derived.canonicalName,
-                        output: derived.outputFilePath || derived.outputDirPath,
-                        metadata: derived.metadataPath,
-                        fps: config.fps,
-                        frames: result.totalFrames
-                    });
+                    if (!(result.output.kind === 'frames' && config.spritePackaging === 'atlas' && result.output.imageExt === 'png')) {
+                        exportIndex.push({
+                            asset: item.name,
+                            animation,
+                            delivery: derived.delivery,
+                            view: derived.view,
+                            canonicalName: derived.canonicalName,
+                            output: derived.outputFilePath || derived.outputBasePath,
+                            metadata: derived.metadataPath,
+                            fps: config.fps,
+                            frames: result.totalFrames
+                        });
+                    }
                 } else {
                     // Legacy: 保持旧命名（每个动画一个文件；图片序列仍打包成 zip）
                     let ext: string;

@@ -8,6 +8,10 @@ export const DEFAULT_CONFIG: ExportConfig = {
   duration: 0,
   scale: 1.0,
   backgroundColor: 'transparent',
+  spritePackaging: 'atlas',
+  atlasMaxSize: 2048,
+  atlasPadding: 2,
+  atlasTrim: true,
   naming: {
     enabled: true,
     view: 'VIEW_SIDE',

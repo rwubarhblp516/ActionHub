@@ -103,7 +103,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                   <Database size={24} className="text-white/40" />
                 </div>
                 <span className="text-[11px] text-white/60 font-black uppercase tracking-widest text-center px-8 leading-relaxed">
-                  导入 Spine 导出目录<br />
+                  导入骨骼动画导出目录<br />
                   <span className="text-white/40 text-[9px] font-bold">(包含 .json/.skel 与 .atlas)</span>
                 </span>
               </motion.div>
@@ -136,7 +136,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                       </span>
                       <div className="flex items-center gap-2 mt-1">
                         <span className={`text-[10px] font-bold uppercase tracking-tighter transition-colors ${selectedIds.has(item.id) ? 'text-white/70' : 'text-white/40'}`}>
-                          Runtime v3.8
+                          运行时 3.8
                         </span>
                         {item.status === 'completed' && <Check className="text-emerald-400" size={12} strokeWidth={3} />}
                         {item.status === 'exporting' && <div className="w-2 h-2 rounded-full bg-indigo-400 animate-pulse" />}

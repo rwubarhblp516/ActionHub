@@ -34,26 +34,26 @@ export const AssetPanel: React.FC<AssetPanelProps> = ({ activeItem }) => {
                     <div className="flex flex-col overflow-hidden">
                         <span className="text-[15px] font-black truncate text-white tracking-tight">{activeItem.name}</span>
                         <div className="flex items-center gap-2 mt-0.5">
-                            <span className="text-[9px] font-black text-indigo-400 uppercase tracking-widest">Runtime Version Protocol</span>
+                            <span className="text-[9px] font-black text-indigo-400 uppercase tracking-widest">运行时版本协议</span>
                             <div className="w-1 h-1 rounded-full bg-indigo-500/50" />
-                            <span className="text-[9px] font-black text-white/30 uppercase tracking-widest">v3.8 Elite</span>
+                            <span className="text-[9px] font-black text-white/30 uppercase tracking-widest">版本 3.8（专业）</span>
                         </div>
                     </div>
                 </div>
                 <div className="flex items-center gap-3">
                     <div className="px-4 py-1.5 rounded-full bg-emerald-500/10 border border-emerald-500/20 flex items-center gap-2">
                         <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)]" />
-                        <span className="text-[10px] font-black text-emerald-400 uppercase tracking-widest">Verified Assets</span>
+                        <span className="text-[10px] font-black text-emerald-400 uppercase tracking-widest">资产已验证</span>
                     </div>
                 </div>
             </div>
 
             <div className="flex-1 overflow-y-auto px-6 py-8 space-y-12 custom-scrollbar relative min-h-0">
-                {/* Core Pipeline Files */}
+                {/* Core Files */}
                 <section className="space-y-4">
                     <div className="flex items-center gap-3 px-1">
                         <div className="w-1 h-3 rounded-full bg-indigo-500" />
-                        <h3 className="text-[10px] text-white/60 uppercase font-black tracking-[0.25em]">核心工程模型 (Pipeline)</h3>
+                        <h3 className="text-[10px] text-white/60 uppercase font-black tracking-[0.25em]">核心工程文件</h3>
                     </div>
                     <div className="grid grid-cols-2 gap-4">
                         <div className="flex items-center justify-between p-4 bg-white/[0.03] rounded-[24px] border border-white/10 hover:bg-white/[0.06] hover:border-white/20 transition-all group shadow-lg">
@@ -62,8 +62,8 @@ export const AssetPanel: React.FC<AssetPanelProps> = ({ activeItem }) => {
                                     <FileCode size={20} />
                                 </div>
                                 <div className="flex flex-col overflow-hidden">
-                                    <span className="text-[12px] font-black truncate text-white group-hover:text-white transition-colors">Skeleton Map</span>
-                                    <span className="text-[10px] text-white/30 font-mono truncate mt-0.5">{files.skeleton?.name || 'Missing Protocol'}</span>
+                                    <span className="text-[12px] font-black truncate text-white group-hover:text-white transition-colors">骨架文件</span>
+                                    <span className="text-[10px] text-white/30 font-mono truncate mt-0.5">{files.skeleton?.name || '缺少骨架文件'}</span>
                                 </div>
                             </div>
                             {files.skeleton
@@ -78,8 +78,8 @@ export const AssetPanel: React.FC<AssetPanelProps> = ({ activeItem }) => {
                                     <FileText size={20} />
                                 </div>
                                 <div className="flex flex-col overflow-hidden">
-                                    <span className="text-[12px] font-black truncate text-white group-hover:text-white transition-colors">Atlas Mapping</span>
-                                    <span className="text-[10px] text-white/30 font-mono truncate mt-0.5">{files.atlas?.name || 'Missing Definition'}</span>
+                                    <span className="text-[12px] font-black truncate text-white group-hover:text-white transition-colors">图集文件</span>
+                                    <span className="text-[10px] text-white/30 font-mono truncate mt-0.5">{files.atlas?.name || '缺少图集文件'}</span>
                                 </div>
                             </div>
                             {files.atlas
@@ -95,11 +95,11 @@ export const AssetPanel: React.FC<AssetPanelProps> = ({ activeItem }) => {
                     <div className="flex items-center justify-between px-1">
                         <div className="flex items-center gap-3">
                             <div className="w-1 h-3 rounded-full bg-indigo-500" />
-                            <h3 className="text-[10px] text-white/60 uppercase font-black tracking-[0.25em]">贴图图层 (Textures Canvas)</h3>
+                            <h3 className="text-[10px] text-white/60 uppercase font-black tracking-[0.25em]">贴图图层</h3>
                         </div>
                         <div className="px-3 py-1 rounded-full bg-white/5 border border-white/10">
                             <span className="text-[10px] font-mono text-white/40 font-black uppercase">
-                                {files.images.filter(img => !['001.png', 'A1a.png'].includes(img.name)).length} Physical Layers
+                                {files.images.filter(img => !['001.png', 'A1a.png'].includes(img.name)).length} 个贴图图层
                             </span>
                         </div>
                     </div>
@@ -119,7 +119,7 @@ export const AssetPanel: React.FC<AssetPanelProps> = ({ activeItem }) => {
                                     </div>
                                     <div className="flex flex-col gap-1 relative z-10">
                                         <div className="text-[11px] font-black truncate text-white/80 group-hover:text-white transition-colors">{img.name}</div>
-                                        <div className="text-[9px] font-mono font-bold text-white/20 group-hover:text-indigo-400 transition-colors">{(img.size / 1024).toFixed(1)} KB</div>
+                                        <div className="text-[9px] font-mono font-bold text-white/20 group-hover:text-indigo-400 transition-colors">{(img.size / 1024).toFixed(1)} 千字节</div>
                                     </div>
                                     {/* Decorative background element */}
                                     <div className="absolute -right-3 -bottom-3 text-white/[0.03] rotate-12 group-hover:text-white/[0.08] transition-all">

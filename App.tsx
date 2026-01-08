@@ -21,6 +21,7 @@ import {
 import { motion, AnimatePresence } from 'framer-motion';
 
 const LAYOUT_STORAGE_KEY = 'actionhub.layout.v1';
+const CONFIG_STORAGE_KEY = 'actionhub.config.v1';
 
 type LayoutStateV1 = {
   leftWidth: number;
@@ -41,6 +42,25 @@ const clampNumber = (value: unknown, min: number, max: number, fallback: number)
 
 const isRightTab = (v: unknown): v is LayoutStateV1['rightTab'] => v === 'export' || v === 'template' || v === 'asset';
 const isAssetDock = (v: unknown): v is LayoutStateV1['assetDock'] => v === 'bottom' || v === 'right';
+
+type PersistedConfigV1 = {
+  version: '1';
+  config: ExportConfig;
+};
+
+const isExportFormat = (v: any): v is ExportConfig['format'] => [
+  'webm-vp9',
+  'webm-vp8',
+  'mp4',
+  'png-sequence',
+  'jpg-sequence',
+  'mp4-h264',
+].includes(v);
+
+const isViewId = (v: any) => v === 'VIEW_SIDE' || v === 'VIEW_TOP' || v === 'VIEW_ISO45';
+const isDirectionSet = (v: any) => v === 'LR' || v === '4dir' || v === '8dir' || v === 'none';
+const isTimingType = (v: any) => v === 'loop' || v === 'once';
+const isSpritePackaging = (v: any) => v === 'sequence' || v === 'atlas';
 
 const App: React.FC = () => {
   // --- Core State ---
@@ -65,6 +85,8 @@ const App: React.FC = () => {
   const rendererRef = useRef<SpineRenderer | null>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
   const layoutHydratedRef = useRef(false);
+  const configHydratedRef = useRef(false);
+  const configPersistTimerRef = useRef<number | null>(null);
 
   // --- Handlers ---
   const handleFilesUpload = useCallback((files: FileList) => {
@@ -170,6 +192,67 @@ const App: React.FC = () => {
     }
   }, [leftWidth, rightWidth, bottomHeight, showLeft, showRight, showBottom, assetDock, rightTab]);
 
+  const persistConfigNow = useCallback((next: ExportConfig) => {
+    try {
+      const payload: PersistedConfigV1 = { version: '1', config: next };
+      localStorage.setItem(CONFIG_STORAGE_KEY, JSON.stringify(payload));
+    } catch {
+      // ignore
+    }
+  }, []);
+
+  React.useEffect(() => {
+    try {
+      const raw = localStorage.getItem(CONFIG_STORAGE_KEY);
+      if (!raw) return;
+      const parsed = JSON.parse(raw) as PersistedConfigV1;
+      if (!parsed || parsed.version !== '1' || !parsed.config) return;
+      const c = parsed.config as any;
+
+      const next: ExportConfig = {
+        ...DEFAULT_CONFIG,
+        width: clampNumber(c.width, 64, 8192, DEFAULT_CONFIG.width),
+        height: clampNumber(c.height, 64, 8192, DEFAULT_CONFIG.height),
+        fps: clampNumber(c.fps, 1, 240, DEFAULT_CONFIG.fps),
+        format: isExportFormat(c.format) ? c.format : DEFAULT_CONFIG.format,
+        duration: clampNumber(c.duration, 0, 3600, DEFAULT_CONFIG.duration),
+        scale: clampNumber(c.scale, 0.1, 5.0, DEFAULT_CONFIG.scale),
+        backgroundColor: typeof c.backgroundColor === 'string' ? c.backgroundColor : DEFAULT_CONFIG.backgroundColor,
+        spritePackaging: isSpritePackaging(c.spritePackaging) ? c.spritePackaging : DEFAULT_CONFIG.spritePackaging,
+        atlasMaxSize: clampNumber(c.atlasMaxSize, 256, 8192, DEFAULT_CONFIG.atlasMaxSize),
+        atlasPadding: clampNumber(c.atlasPadding, 0, 64, DEFAULT_CONFIG.atlasPadding),
+        atlasTrim: typeof c.atlasTrim === 'boolean' ? c.atlasTrim : DEFAULT_CONFIG.atlasTrim,
+        naming: {
+          ...DEFAULT_CONFIG.naming,
+          ...(c.naming || {}),
+          enabled: Boolean(c.naming?.enabled),
+          view: isViewId(c.naming?.view) ? c.naming.view : DEFAULT_CONFIG.naming.view,
+          defaultCategory: typeof c.naming?.defaultCategory === 'string' ? c.naming.defaultCategory : DEFAULT_CONFIG.naming.defaultCategory,
+          defaultDir: isDirectionSet(c.naming?.defaultDir) ? c.naming.defaultDir : DEFAULT_CONFIG.naming.defaultDir,
+          defaultType: isTimingType(c.naming?.defaultType) ? c.naming.defaultType : DEFAULT_CONFIG.naming.defaultType,
+          manifest: (c.naming?.manifest && typeof c.naming.manifest === 'object') ? c.naming.manifest : undefined,
+        },
+      };
+
+      setConfig(next);
+    } catch (e) {
+      console.warn('导出配置缓存读取失败，将使用默认配置:', e);
+    } finally {
+      Promise.resolve().then(() => { configHydratedRef.current = true; });
+    }
+  }, []);
+
+  React.useEffect(() => {
+    if (!configHydratedRef.current) return;
+    if (configPersistTimerRef.current) window.clearTimeout(configPersistTimerRef.current);
+    configPersistTimerRef.current = window.setTimeout(() => {
+      persistConfigNow(config);
+    }, 250);
+    return () => {
+      if (configPersistTimerRef.current) window.clearTimeout(configPersistTimerRef.current);
+    };
+  }, [config, persistConfigNow]);
+
   const processExportQueue = async () => {
     const selectedItems = items.filter(i => selectedIds.has(i.id));
     if (selectedItems.length === 0) return;
@@ -271,8 +354,8 @@ const App: React.FC = () => {
               <Activity size={22} className="text-black" strokeWidth={3} />
             </div>
             <div className="flex flex-col">
-              <span className="text-[15px] font-black uppercase tracking-[0.2em] text-white leading-none">Spine Studio</span>
-              <span className="text-[9px] font-black text-indigo-400 uppercase tracking-[0.25em] mt-1.5">Professional Production</span>
+              <span className="text-[15px] font-black uppercase tracking-[0.2em] text-white leading-none">骨骼动画工作台</span>
+              <span className="text-[9px] font-black text-indigo-400 uppercase tracking-[0.25em] mt-1.5">专业生产线</span>
             </div>
           </div>
           <div className="w-px h-8 bg-white/10" />
@@ -359,7 +442,7 @@ const App: React.FC = () => {
           <>
             <div className="flex flex-col shrink-0 min-h-0" style={{ width: leftWidth }}>
               <EditorPanel
-                title="项目资产 (Library)"
+                title="项目资产"
                 flex={1}
                 minWidth={180}
                 menuItems={[
@@ -385,11 +468,11 @@ const App: React.FC = () => {
         )}
 
         {/* Middle Column */}
-        <div className="flex-1 flex flex-col gap-3 min-h-0 overflow-hidden">
-          {/* Viewport */}
-          <div className="flex-1 flex flex-col min-h-0 relative group">
-            <EditorPanel
-              title="Studio 实时渲染视口 (Viewport)"
+          <div className="flex-1 flex flex-col gap-3 min-h-0 overflow-hidden">
+            {/* Viewport */}
+            <div className="flex-1 flex flex-col min-h-0 relative group">
+              <EditorPanel
+              title="实时渲染视口"
               flex={1}
               menuItems={[
                 { label: showLeft ? '隐藏左侧栏' : '显示左侧栏', onClick: () => setShowLeft(v => !v) },
@@ -423,8 +506,8 @@ const App: React.FC = () => {
                   <div className="w-1 h-12 bg-indigo-500 rounded-full" />
                   <div className="flex flex-col">
                     <span className="text-[10px] text-indigo-400 font-black uppercase tracking-widest">渲染核心参数</span>
-                    <span className="text-[14px] text-white font-mono font-medium">{config.width}x{config.height} <span className="text-white/40 px-1">/</span> {config.fps}fps</span>
-                    <span className="text-[10px] text-white/50 mt-1 uppercase font-bold tracking-tighter">Real-time WebGL Pipeline</span>
+                    <span className="text-[14px] text-white font-mono font-medium">{config.width}x{config.height} <span className="text-white/40 px-1">/</span> {config.fps} 帧/秒</span>
+                    <span className="text-[10px] text-white/50 mt-1 uppercase font-bold tracking-tighter">实时渲染管线</span>
                   </div>
                 </div>
               </div>
@@ -438,7 +521,7 @@ const App: React.FC = () => {
               {/* Bottom Asset Inspector */}
               <div style={{ height: bottomHeight }} className="shrink-0 flex flex-col min-h-0">
                 <EditorPanel
-                  title="资产看板 / 依赖映射 (Pipeline Inspector)"
+                  title="资产看板 / 依赖映射"
                   flex={1}
                   menuItems={[
                     { label: '隐藏底部栏', onClick: () => setShowBottom(false) },
@@ -512,19 +595,20 @@ const App: React.FC = () => {
                         totalItems={items.length}
                       />
                     ) : rightTab === 'template' ? (
-                      <ActionTemplatePanel
-                        activeItem={activeItem}
-                        animationNames={activeItem?.animationNames || []}
-                        manifest={config.naming.manifest}
-                        defaults={{
-                          view: config.naming.view,
-                          category: config.naming.defaultCategory,
-                          dir: config.naming.defaultDir,
-                          type: config.naming.defaultType,
-                        }}
-                        disabled={isExporting}
-                        onUpdateManifest={(m) => updateConfig({ naming: { ...config.naming, manifest: m } })}
-                      />
+	                      <ActionTemplatePanel
+	                        activeItem={activeItem}
+	                        animationNames={activeItem?.animationNames || []}
+	                        manifest={config.naming.manifest}
+	                        defaults={{
+	                          view: config.naming.view,
+	                          category: config.naming.defaultCategory,
+	                          dir: config.naming.defaultDir,
+	                          type: config.naming.defaultType,
+	                        }}
+	                        disabled={isExporting}
+	                        onUpdateManifest={(m) => updateConfig({ naming: { ...config.naming, manifest: m } })}
+	                        onSaveToLocal={() => persistConfigNow(config)}
+	                      />
                     ) : (
                       <AssetPanel activeItem={activeItem} />
                     )}

@@ -65,7 +65,7 @@ export const ExportPanel: React.FC<ExportPanelProps> = ({
                 <Monitor size={16} className="text-indigo-400" />
               </div>
               <div className="flex flex-col gap-1">
-                <span className="text-[11px] text-white font-black uppercase tracking-widest">输出分辨率 (Resolution)</span>
+                <span className="text-[11px] text-white font-black uppercase tracking-widest">输出分辨率</span>
                 <span className="text-[9px] text-white/40 font-bold">渲染质量取决于原始资产尺寸</span>
               </div>
             </div>
@@ -92,7 +92,7 @@ export const ExportPanel: React.FC<ExportPanelProps> = ({
 
             <div className="flex items-center gap-3 mt-1">
               <div className="flex-1 bg-white/[0.05] rounded-2xl border border-white/10 p-4 flex items-center gap-4 group focus-within:border-indigo-500/50 transition-colors">
-                <span className="text-[10px] text-indigo-400 font-extrabold uppercase">W</span>
+                <span className="text-[10px] text-indigo-400 font-extrabold uppercase">宽</span>
                 <input
                   type="number"
                   value={config.width}
@@ -102,7 +102,7 @@ export const ExportPanel: React.FC<ExportPanelProps> = ({
               </div>
               <span className="text-white/20 text-xl font-light">/</span>
               <div className="flex-1 bg-white/[0.05] rounded-2xl border border-white/10 p-4 flex items-center gap-4 group focus-within:border-indigo-500/50 transition-colors">
-                <span className="text-[10px] text-indigo-400 font-extrabold uppercase">H</span>
+                <span className="text-[10px] text-indigo-400 font-extrabold uppercase">高</span>
                 <input
                   type="number"
                   value={config.height}
@@ -120,7 +120,7 @@ export const ExportPanel: React.FC<ExportPanelProps> = ({
                 <Zap size={16} className="text-indigo-400" />
               </div>
               <div className="flex flex-col gap-1">
-                <span className="text-[11px] text-white font-black uppercase tracking-widest">输出帧率 (Frame Rate)</span>
+                <span className="text-[11px] text-white font-black uppercase tracking-widest">输出帧率</span>
                 <span className="text-[9px] text-white/40 font-bold">与预览播放帧率同步</span>
               </div>
             </div>
@@ -134,7 +134,7 @@ export const ExportPanel: React.FC<ExportPanelProps> = ({
                     : 'text-white/40 hover:text-white hover:bg-white/5'
                     }`}
                 >
-                  {fps} FPS
+                  {fps} 帧/秒
                 </button>
               ))}
             </div>
@@ -147,13 +147,13 @@ export const ExportPanel: React.FC<ExportPanelProps> = ({
                 <Film size={16} className="text-indigo-400" />
               </div>
               <div className="flex flex-col gap-1">
-                <span className="text-[11px] text-white font-black uppercase tracking-widest">视频格式 (Format)</span>
+                <span className="text-[11px] text-white font-black uppercase tracking-widest">导出格式</span>
                 <span className="text-[9px] text-white/40 font-bold">编码器与兼容性</span>
               </div>
             </div>
             <div className="flex flex-col gap-2">
-              {[
-                { value: 'png-sequence', label: 'PNG 序列 (推荐)', desc: '兼容EbSynth等工具' },
+                {[
+                { value: 'png-sequence', label: 'PNG 序列（推荐）', desc: '兼容常见逐帧后处理流程' },
                 { value: 'jpg-sequence', label: 'JPG 序列', desc: '文件更小' },
                 { value: 'mp4-h264', label: 'MP4 (H.264)', desc: '真正的MP4,通用格式' },
                 { value: 'webm-vp9', label: 'WebM (VP9)', desc: '高质量视频' },
@@ -161,7 +161,13 @@ export const ExportPanel: React.FC<ExportPanelProps> = ({
               ].map((fmt) => (
                 <button
                   key={fmt.value}
-                  onClick={() => onUpdate({ format: fmt.value as any })}
+                  onClick={() => {
+                    if (fmt.value === 'jpg-sequence') {
+                      onUpdate({ format: fmt.value as any, spritePackaging: 'sequence' });
+                    } else {
+                      onUpdate({ format: fmt.value as any });
+                    }
+                  }}
                   className={`py-3 px-4 rounded-[16px] text-left transition-all border ${config.format === fmt.value
                     ? 'bg-white/15 text-white border-white/20 shadow-lg'
                     : 'bg-white/[0.03] border-white/5 text-white/70 hover:bg-white/[0.08] hover:border-white/20'
@@ -181,6 +187,88 @@ export const ExportPanel: React.FC<ExportPanelProps> = ({
             </div>
           </div>
 
+          {/* Section: Sprite Packaging */}
+          {(config.format === 'png-sequence' || config.format === 'jpg-sequence') && (
+            <div className="flex flex-col gap-5">
+              <div className="flex items-center gap-3">
+                <div className="w-9 h-9 rounded-2xl bg-white/[0.05] flex items-center justify-center border border-white/10 shadow-lg">
+                  <Layers size={16} className="text-indigo-400" />
+                </div>
+                <div className="flex flex-col gap-1">
+                  <span className="text-[11px] text-white font-black uppercase tracking-widest">精灵图打包</span>
+                  <span className="text-[9px] text-white/40 font-bold">图集可显著减少文件数量</span>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => onUpdate({ spritePackaging: 'atlas' })}
+                  disabled={config.format !== 'png-sequence'}
+                  className={`flex-1 py-3 rounded-[16px] text-[11px] font-black transition-all border ${config.spritePackaging === 'atlas'
+                    ? 'bg-white/15 text-white border-white/20 shadow-lg'
+                    : 'bg-white/[0.03] border-white/5 text-white/70 hover:bg-white/[0.08] hover:border-white/20'
+                    } ${config.format !== 'png-sequence' ? 'opacity-40 cursor-not-allowed' : ''}`}
+                  title={config.format !== 'png-sequence' ? '图集需要 PNG 以支持透明通道' : '打包为 PNG 图集 + JSON'}
+                >
+                  图集 (PNG+JSON)
+                </button>
+                <button
+                  onClick={() => onUpdate({ spritePackaging: 'sequence' })}
+                  className={`flex-1 py-3 rounded-[16px] text-[11px] font-black transition-all border ${config.spritePackaging === 'sequence'
+                    ? 'bg-white/15 text-white border-white/20 shadow-lg'
+                    : 'bg-white/[0.03] border-white/5 text-white/70 hover:bg-white/[0.08] hover:border-white/20'
+                    }`}
+                  title="保留每帧一个文件"
+                >
+                  序列帧
+                </button>
+              </div>
+
+              {config.spritePackaging === 'atlas' && config.format === 'png-sequence' && (
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="flex flex-col gap-2">
+                    <span className="text-[9px] text-white/50 font-black uppercase tracking-widest">图集最大尺寸</span>
+                    <select
+                      value={config.atlasMaxSize}
+                      onChange={(e) => onUpdate({ atlasMaxSize: parseInt(e.target.value, 10) || 2048 })}
+                      className="bg-black/40 border border-white/10 rounded-xl px-3 py-2 text-[11px] text-white font-mono font-bold focus:outline-none focus:ring-1 focus:ring-indigo-500/50"
+                    >
+                      {[1024, 2048, 4096].map(v => <option key={v} value={v}>{v}</option>)}
+                    </select>
+                  </div>
+
+                  <div className="flex flex-col gap-2">
+                    <span className="text-[9px] text-white/50 font-black uppercase tracking-widest">边距</span>
+                    <input
+                      type="number"
+                      min={0}
+                      max={64}
+                      value={config.atlasPadding}
+                      onChange={(e) => onUpdate({ atlasPadding: parseInt(e.target.value, 10) || 0 })}
+                      className="bg-black/40 border border-white/10 rounded-xl px-3 py-2 text-[11px] text-white font-mono font-bold focus:outline-none focus:ring-1 focus:ring-indigo-500/50"
+                    />
+                  </div>
+
+                  <div className="col-span-2 flex items-center justify-between p-3 rounded-2xl bg-white/[0.02] border border-white/10">
+                    <div className="flex flex-col gap-0.5">
+                      <span className="text-[10px] text-white/70 font-black uppercase tracking-widest">裁切</span>
+                      <span className="text-[9px] text-white/40 font-bold">裁掉透明边缘以减小图集</span>
+                    </div>
+                    <button
+                      onClick={() => onUpdate({ atlasTrim: !config.atlasTrim })}
+                      className={`px-4 py-1.5 rounded-xl text-[9px] font-black uppercase tracking-widest border transition-all ${config.atlasTrim
+                        ? 'bg-indigo-500 text-white border-indigo-400'
+                        : 'bg-white/5 text-white/40 border-white/10 hover:border-white/20'
+                        }`}
+                    >
+                      {config.atlasTrim ? '开' : '关'}
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
           {/* Section: ActionHub Naming */}
           <div className="flex flex-col gap-5">
             <div className="flex items-center justify-between">
@@ -189,8 +277,8 @@ export const ExportPanel: React.FC<ExportPanelProps> = ({
                   <Layers size={16} className="text-indigo-400" />
                 </div>
                 <div className="flex flex-col gap-1">
-                  <span className="text-[11px] text-white font-black uppercase tracking-widest">ActionHub 命名规范</span>
-                  <span className="text-[9px] text-white/40 font-bold">导出目录 + metadata/derived</span>
+                  <span className="text-[11px] text-white font-black uppercase tracking-widest">命名规范</span>
+                  <span className="text-[9px] text-white/40 font-bold">导出目录 + 元数据/派生</span>
                 </div>
               </div>
 
@@ -201,73 +289,73 @@ export const ExportPanel: React.FC<ExportPanelProps> = ({
                   : 'bg-white/5 text-white/40 border-white/10 hover:border-white/20'
                   }`}
               >
-                {config.naming.enabled ? 'Enabled' : 'Disabled'}
+                {config.naming.enabled ? '已启用' : '已停用'}
               </button>
             </div>
 
             <div className={`flex flex-col gap-4 p-4 rounded-3xl border bg-white/[0.03] ${config.naming.enabled ? 'border-white/10' : 'border-white/5 opacity-60'}`}>
               <div className="grid grid-cols-2 gap-3">
                 <div className="flex flex-col gap-2">
-                  <span className="text-[9px] text-white/50 font-black uppercase tracking-widest">View</span>
+                  <span className="text-[9px] text-white/50 font-black uppercase tracking-widest">视角</span>
                   <select
                     value={config.naming.view}
                     onChange={(e) => onUpdate({ naming: { ...config.naming, view: e.target.value as any } })}
                     disabled={!config.naming.enabled}
                     className="bg-black/40 border border-white/10 rounded-xl px-3 py-2 text-[11px] text-white font-mono font-bold focus:outline-none focus:ring-1 focus:ring-indigo-500/50 disabled:opacity-40"
                   >
-                    <option value="VIEW_SIDE">VIEW_SIDE</option>
-                    <option value="VIEW_TOP">VIEW_TOP</option>
-                    <option value="VIEW_ISO45">VIEW_ISO45</option>
+                    <option value="VIEW_SIDE">侧视</option>
+                    <option value="VIEW_TOP">俯视</option>
+                    <option value="VIEW_ISO45">45度</option>
                   </select>
                 </div>
 
                 <div className="flex flex-col gap-2">
-                  <span className="text-[9px] text-white/50 font-black uppercase tracking-widest">Category Default</span>
+                  <span className="text-[9px] text-white/50 font-black uppercase tracking-widest">默认分类</span>
                   <input
                     value={config.naming.defaultCategory}
                     onChange={(e) => onUpdate({ naming: { ...config.naming, defaultCategory: e.target.value } })}
                     disabled={!config.naming.enabled}
                     className="bg-black/40 border border-white/10 rounded-xl px-3 py-2 text-[11px] text-white font-mono font-bold focus:outline-none focus:ring-1 focus:ring-indigo-500/50 disabled:opacity-40"
-                    placeholder="locomotion / combat / misc"
+                    placeholder="如：locomotion / combat / misc"
                   />
                 </div>
               </div>
 
               <div className="grid grid-cols-2 gap-3">
                 <div className="flex flex-col gap-2">
-                  <span className="text-[9px] text-white/50 font-black uppercase tracking-widest">Dir Default</span>
+                  <span className="text-[9px] text-white/50 font-black uppercase tracking-widest">默认方向</span>
                   <select
                     value={config.naming.defaultDir}
                     onChange={(e) => onUpdate({ naming: { ...config.naming, defaultDir: e.target.value as any } })}
                     disabled={!config.naming.enabled}
                     className="bg-black/40 border border-white/10 rounded-xl px-3 py-2 text-[11px] text-white font-mono font-bold focus:outline-none focus:ring-1 focus:ring-indigo-500/50 disabled:opacity-40"
                   >
-                    <option value="none">none</option>
-                    <option value="LR">LR</option>
-                    <option value="4dir">4dir</option>
-                    <option value="8dir">8dir</option>
+                    <option value="none">无</option>
+                    <option value="LR">左右</option>
+                    <option value="4dir">四方向</option>
+                    <option value="8dir">八方向</option>
                   </select>
                 </div>
 
                 <div className="flex flex-col gap-2">
-                  <span className="text-[9px] text-white/50 font-black uppercase tracking-widest">Type Default</span>
+                  <span className="text-[9px] text-white/50 font-black uppercase tracking-widest">默认类型</span>
                   <select
                     value={config.naming.defaultType}
                     onChange={(e) => onUpdate({ naming: { ...config.naming, defaultType: e.target.value as any } })}
                     disabled={!config.naming.enabled}
                     className="bg-black/40 border border-white/10 rounded-xl px-3 py-2 text-[11px] text-white font-mono font-bold focus:outline-none focus:ring-1 focus:ring-indigo-500/50 disabled:opacity-40"
                   >
-                    <option value="once">once</option>
-                    <option value="loop">loop</option>
+                    <option value="once">单次</option>
+                    <option value="loop">循环</option>
                   </select>
                 </div>
               </div>
 
               <div className="flex items-center justify-between gap-3">
                 <div className="flex flex-col gap-1">
-                  <span className="text-[10px] text-white/70 font-black uppercase tracking-widest">Manifest (可选)</span>
+                  <span className="text-[10px] text-white/70 font-black uppercase tracking-widest">清单（可选）</span>
                   <span className="text-[9px] text-white/40 font-bold">
-                    mappings key: `资产名::动画名`（或直接 `动画名`）
+                    映射键：`资产名::动画名`（或直接 `动画名`）
                   </span>
                 </div>
 
@@ -288,7 +376,7 @@ export const ExportPanel: React.FC<ExportPanelProps> = ({
                     onClick={() => manifestInputRef.current?.click()}
                     disabled={!config.naming.enabled}
                     className="px-3 py-2 rounded-xl bg-white/5 border border-white/10 text-[10px] font-black uppercase tracking-widest text-white/70 hover:bg-white/10 hover:border-white/20 transition-all disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-2"
-                    title="导入 manifest.json"
+                    title="导入清单文件"
                   >
                     <FileText size={14} className="text-indigo-400" />
                     导入
@@ -299,7 +387,7 @@ export const ExportPanel: React.FC<ExportPanelProps> = ({
                       onClick={() => onUpdate({ naming: { ...config.naming, manifest: undefined } })}
                       disabled={!config.naming.enabled}
                       className="p-2 rounded-xl bg-white/5 border border-white/10 text-white/60 hover:text-white hover:bg-white/10 hover:border-white/20 transition-all disabled:opacity-40 disabled:cursor-not-allowed"
-                      title="清除 manifest"
+                      title="清除清单"
                     >
                       <X size={14} />
                     </button>
@@ -308,13 +396,13 @@ export const ExportPanel: React.FC<ExportPanelProps> = ({
               </div>
 
               <div className="flex items-center justify-between text-[10px] font-black uppercase tracking-widest">
-                <span className="text-white/50">Manifest: {config.naming.manifest ? 'Loaded' : 'None'}</span>
-                <span className="text-indigo-400 font-mono">{config.naming.manifest ? `${manifestMappingsCount} mappings` : ''}</span>
+                <span className="text-white/50">清单：{config.naming.manifest ? '已加载' : '无'}</span>
+                <span className="text-indigo-400 font-mono">{config.naming.manifest ? `${manifestMappingsCount} 条映射` : ''}</span>
               </div>
 
               {manifestError && (
                 <div className="text-[10px] font-bold text-red-300 bg-red-500/10 border border-red-500/20 rounded-2xl p-3">
-                  manifest 解析失败: {manifestError}
+                  清单解析失败: {manifestError}
                 </div>
               )}
             </div>
@@ -327,7 +415,7 @@ export const ExportPanel: React.FC<ExportPanelProps> = ({
                 <div className="w-9 h-9 rounded-2xl bg-white/[0.05] flex items-center justify-center border border-white/10 shadow-lg">
                   <Palette size={16} className="text-indigo-400" />
                 </div>
-                <span className="text-[11px] text-white font-black uppercase tracking-widest px-1">画布底色 (Canvas)</span>
+                <span className="text-[11px] text-white font-black uppercase tracking-widest px-1">画布底色</span>
               </div>
 
               <button
@@ -337,7 +425,7 @@ export const ExportPanel: React.FC<ExportPanelProps> = ({
                   : 'bg-white/5 text-white/40 border-white/10 hover:border-white/20'
                   }`}
               >
-                {config.backgroundColor === 'transparent' ? 'Alpha Enabled' : 'Use Transparency'}
+                {config.backgroundColor === 'transparent' ? '透明：已开启' : '启用透明'}
               </button>
             </div>
 
@@ -373,10 +461,10 @@ export const ExportPanel: React.FC<ExportPanelProps> = ({
 
               <div className="flex flex-col flex-1 gap-1">
                 <span className="text-[12px] text-white font-mono font-black uppercase tracking-wider">
-                  {config.backgroundColor === 'transparent' ? 'TRANSPARENT' : config.backgroundColor}
+                  {config.backgroundColor === 'transparent' ? '透明' : config.backgroundColor}
                 </span>
                 <span className="text-[9px] text-white/50 font-black uppercase tracking-[0.2em]">
-                  {config.backgroundColor === 'transparent' ? 'Alpha Channel Output' : 'Hex Color Pipeline'}
+                  {config.backgroundColor === 'transparent' ? '输出透明通道' : '纯色背景'}
                 </span>
               </div>
 
@@ -394,12 +482,12 @@ export const ExportPanel: React.FC<ExportPanelProps> = ({
       <div className="pt-8 px-6 border-t border-white/10 flex flex-col gap-6 bg-transparent shrink-0">
         <div className="flex items-center justify-between px-2">
           <div className="flex flex-col gap-1">
-            <span className="text-[10px] text-white/50 font-black uppercase tracking-widest">Selected Assets</span>
+            <span className="text-[10px] text-white/50 font-black uppercase tracking-widest">已选资产</span>
             <span className="text-xl text-white font-black leading-none">{selectedCount} <span className="text-white/20 text-sm">/ {totalItems}</span></span>
           </div>
           <div className="flex flex-col items-end gap-1">
-            <span className="text-[10px] text-white/50 font-black uppercase tracking-widest">Est. Payload</span>
-            <span className="text-[14px] text-indigo-400 font-mono font-black leading-none">~31.2 MB</span>
+            <span className="text-[10px] text-white/50 font-black uppercase tracking-widest">预计体积</span>
+            <span className="text-[14px] text-indigo-400 font-mono font-black leading-none">~31.2 兆字节</span>
           </div>
         </div>
 

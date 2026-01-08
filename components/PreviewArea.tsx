@@ -1,10 +1,12 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { motion } from 'framer-motion';
 import { AnimationItem, ExportConfig } from '../types';
 import { SpineRenderer } from '../services/spineRenderer';
-import { Maximize, ZoomIn, ZoomOut, Crosshair, Play, Loader2, AlertCircle, RefreshCw, WifiOff, ChevronLeft, ChevronRight, FileText, Layers } from 'lucide-react';
+import { Maximize, ZoomIn, ZoomOut, Crosshair, Play, Loader2, AlertCircle, RefreshCw, WifiOff, ChevronLeft, ChevronRight, FileText, Layers, Image as ImageIcon } from 'lucide-react';
 import { ProgressBar } from './ProgressBar';
 import { normalizeCanonicalName } from '../services/actionHubNaming';
+import { OffscreenRenderer } from '../services/offscreenRenderer';
+import { packFramesToAtlas } from '../services/atlasPacker';
 
 interface PreviewAreaProps {
   activeItem: AnimationItem | null;
@@ -36,9 +38,78 @@ export const PreviewArea: React.FC<PreviewAreaProps> = ({
   const [isPlaying, setIsPlaying] = useState<boolean>(true);
   const [showSkeleton, setShowSkeleton] = useState<boolean>(false);
   const [setupPose, setSetupPose] = useState<boolean>(false);
+  const [spritePreviewEnabled, setSpritePreviewEnabled] = useState<boolean>(false);
+  const [spritePreviewState, setSpritePreviewState] = useState<'idle' | 'loading' | 'ready' | 'error'>('idle');
+  const [spritePreviewError, setSpritePreviewError] = useState<string | null>(null);
+  const [spriteViewMode, setSpriteViewMode] = useState<'anim' | 'atlas'>('anim');
+  const [atlasPageIndex, setAtlasPageIndex] = useState<number>(0);
 
   const [spineState, setSpineState] = useState<'loading' | 'ready' | 'error'>('loading');
   const [loadingMessage, setLoadingMessage] = useState('正在初始化...');
+
+  const spriteCanvasRef = useRef<HTMLCanvasElement>(null);
+  const offscreenRef = useRef<OffscreenRenderer | null>(null);
+  const spriteAbortRef = useRef<AbortController | null>(null);
+
+  type SpriteFrameRef = {
+    pageIndex: number;
+    frame: { x: number; y: number; w: number; h: number };
+    spriteSourceSize: { x: number; y: number; w: number; h: number };
+    sourceSize: { w: number; h: number };
+  };
+
+  const spritePagesRef = useRef<ImageBitmap[]>([]);
+  const spriteFramesRef = useRef<SpriteFrameRef[]>([]);
+  const spriteFrameCountRef = useRef(0);
+  const spritePlaybackRef = useRef({
+    raf: 0 as number,
+    lastTs: 0 as number,
+    acc: 0 as number,
+    frameIndex: 0 as number,
+    playing: true as boolean,
+  });
+
+  const canSpritePreview = useMemo(() => {
+    return config.format === 'png-sequence' || config.format === 'jpg-sequence';
+  }, [config.format]);
+
+  const canAtlasPreview = useMemo(() => {
+    return config.format === 'png-sequence' && config.spritePackaging === 'atlas';
+  }, [config.format, config.spritePackaging]);
+
+  const spritePreviewKey = useMemo(() => {
+    if (!activeItem) return '';
+    return JSON.stringify({
+      item: activeItem.id,
+      anim: currentAnim,
+      format: config.format,
+      spritePackaging: config.spritePackaging,
+      width: config.width,
+      height: config.height,
+      fps: config.fps,
+      backgroundColor: config.backgroundColor,
+      atlasMaxSize: config.atlasMaxSize,
+      atlasPadding: config.atlasPadding,
+      atlasTrim: config.atlasTrim,
+    });
+  }, [
+    activeItem,
+    currentAnim,
+    config.format,
+    config.spritePackaging,
+    config.width,
+    config.height,
+    config.fps,
+    config.backgroundColor,
+    config.atlasMaxSize,
+    config.atlasPadding,
+    config.atlasTrim,
+  ]);
+
+  // 当图集预览不可用时，自动退回到动画预览
+  useEffect(() => {
+    if (!canAtlasPreview && spriteViewMode === 'atlas') setSpriteViewMode('anim');
+  }, [canAtlasPreview, spriteViewMode]);
 
   const resizeToContainer = useCallback(() => {
     if (!containerRef.current || !rendererRef.current || !canvasRef.current) return;
@@ -56,6 +127,49 @@ export const PreviewArea: React.FC<PreviewAreaProps> = ({
     canvasRef.current.style.height = `${cssH}px`;
     rendererRef.current.resize(pixelW, pixelH);
   }, []);
+
+  const renderAtlasPage = useCallback((pageIndex: number) => {
+    if (!spriteCanvasRef.current) return;
+    const ctx = spriteCanvasRef.current.getContext('2d');
+    if (!ctx) return;
+    const pages = spritePagesRef.current;
+    if (pages.length === 0) return;
+    const idx = Math.min(Math.max(0, pageIndex), pages.length - 1);
+    const page = pages[idx];
+
+    const cw = spriteCanvasRef.current.width;
+    const ch = spriteCanvasRef.current.height;
+    ctx.clearRect(0, 0, cw, ch);
+
+    const zoom = config.scale || 1.0;
+    const scale = Math.min(cw / page.width, ch / page.height) * zoom;
+    const drawW = page.width * scale;
+    const drawH = page.height * scale;
+    const dx = (cw - drawW) / 2;
+    const dy = (ch - drawH) / 2;
+
+    ctx.imageSmoothingEnabled = true;
+    ctx.drawImage(page, dx, dy, drawW, drawH);
+  }, [config.scale]);
+
+  const resizeSpriteCanvas = useCallback(() => {
+    if (!containerRef.current || !spriteCanvasRef.current) return;
+    const rect = containerRef.current.getBoundingClientRect();
+    if (rect.width <= 0 || rect.height <= 0) return;
+    const dpr = window.devicePixelRatio || 1;
+    const cssW = Math.floor(rect.width);
+    const cssH = Math.floor(rect.height);
+    const pixelW = Math.max(1, Math.floor(rect.width * dpr));
+    const pixelH = Math.max(1, Math.floor(rect.height * dpr));
+    spriteCanvasRef.current.style.width = `${cssW}px`;
+    spriteCanvasRef.current.style.height = `${cssH}px`;
+    spriteCanvasRef.current.width = pixelW;
+    spriteCanvasRef.current.height = pixelH;
+
+    if (spritePreviewEnabled && spritePreviewState === 'ready' && spriteViewMode === 'atlas') {
+      renderAtlasPage(atlasPageIndex);
+    }
+  }, [atlasPageIndex, renderAtlasPage, spritePreviewEnabled, spritePreviewState, spriteViewMode]);
 
   // 动态加载 Spine 3.8 运行时
   useEffect(() => {
@@ -147,6 +261,253 @@ export const PreviewArea: React.FC<PreviewAreaProps> = ({
     downloadJson(manifest, `manifest_${activeItem.name}.json`);
   };
 
+  const stopSpritePlayback = useCallback(() => {
+    const p = spritePlaybackRef.current;
+    if (p.raf) cancelAnimationFrame(p.raf);
+    p.raf = 0;
+    p.lastTs = 0;
+    p.acc = 0;
+  }, []);
+
+  const startSpritePlayback = useCallback(() => {
+    stopSpritePlayback();
+    const p = spritePlaybackRef.current;
+    p.playing = true;
+    p.lastTs = 0;
+    p.acc = 0;
+
+    const draw = () => {
+      if (!spriteCanvasRef.current) return;
+      const ctx = spriteCanvasRef.current.getContext('2d');
+      if (!ctx) return;
+      const frames = spriteFramesRef.current;
+      const pages = spritePagesRef.current;
+      if (frames.length === 0 || pages.length === 0) return;
+
+      const frameCount = spriteFrameCountRef.current || frames.length;
+      const fps = config.fps || 30;
+
+      const now = performance.now();
+      if (p.lastTs === 0) p.lastTs = now;
+      const dt = now - p.lastTs;
+      p.lastTs = now;
+
+      if (p.playing) {
+        p.acc += dt;
+        const frameMs = 1000 / fps;
+        while (p.acc >= frameMs) {
+          p.acc -= frameMs;
+          p.frameIndex = (p.frameIndex + 1) % frameCount;
+        }
+      }
+
+      const ref = frames[p.frameIndex];
+      const page = pages[ref.pageIndex];
+
+      const cw = spriteCanvasRef.current.width;
+      const ch = spriteCanvasRef.current.height;
+      ctx.clearRect(0, 0, cw, ch);
+
+      // Fit full frame into viewport, preserving aspect; apply zoom from config.scale
+      const fullW = ref.sourceSize.w;
+      const fullH = ref.sourceSize.h;
+      const zoom = config.scale || 1.0;
+      const scale = Math.min(cw / fullW, ch / fullH) * zoom;
+      const drawW = fullW * scale;
+      const drawH = fullH * scale;
+      const dx = (cw - drawW) / 2;
+      const dy = (ch - drawH) / 2;
+
+      // Draw trimmed part into its correct position inside the full frame rect
+      const sx = ref.frame.x;
+      const sy = ref.frame.y;
+      const sw = ref.frame.w;
+      const sh = ref.frame.h;
+      const subDx = dx + ref.spriteSourceSize.x * scale;
+      const subDy = dy + ref.spriteSourceSize.y * scale;
+      const subDw = ref.spriteSourceSize.w * scale;
+      const subDh = ref.spriteSourceSize.h * scale;
+
+      ctx.imageSmoothingEnabled = true;
+      ctx.drawImage(page, sx, sy, sw, sh, subDx, subDy, subDw, subDh);
+
+      p.raf = requestAnimationFrame(draw);
+    };
+
+    p.raf = requestAnimationFrame(draw);
+  }, [config.fps, config.scale, stopSpritePlayback]);
+
+  // 同步播放状态到精灵预览播放
+  useEffect(() => {
+    spritePlaybackRef.current.playing = isPlaying;
+  }, [isPlaying]);
+
+  const clearSpritePreview = useCallback(() => {
+    stopSpritePlayback();
+    spriteAbortRef.current?.abort();
+    spriteAbortRef.current = null;
+    spritePagesRef.current.forEach(b => { try { b.close(); } catch { } });
+    spritePagesRef.current = [];
+    spriteFramesRef.current = [];
+    spriteFrameCountRef.current = 0;
+    spritePlaybackRef.current.frameIndex = 0;
+    setSpritePreviewState('idle');
+    setSpritePreviewError(null);
+    lastSpriteKeyRef.current = '';
+    setAtlasPageIndex(0);
+  }, [stopSpritePlayback]);
+
+  const generateSpritePreview = useCallback(async () => {
+    if (!activeItem || !rendererRef.current) return;
+    if (!canSpritePreview) return;
+    if (!currentAnim) return;
+
+    setSpritePreviewState('loading');
+    setSpritePreviewError(null);
+    stopSpritePlayback();
+    spriteAbortRef.current?.abort();
+    spriteAbortRef.current = new AbortController();
+
+    try {
+      if (!offscreenRef.current) offscreenRef.current = new OffscreenRenderer();
+      const format = config.format === 'jpg-sequence' ? 'jpg-sequence' : 'png-sequence';
+
+      // 保留旧结果直到新结果成功生成，避免失败后“啥都没了”
+      const oldPages = spritePagesRef.current;
+      const oldFrames = spriteFramesRef.current;
+      const oldFrameCount = spriteFrameCountRef.current;
+
+      const result = await offscreenRef.current.renderToVideo({
+        assetName: activeItem.name,
+        animation: currentAnim,
+        files: activeItem.files,
+        width: config.width,
+        height: config.height,
+        fps: config.fps,
+        format: format as any,
+        duration: config.duration,
+        backgroundColor: config.backgroundColor,
+        abortSignal: spriteAbortRef.current.signal,
+      });
+
+      if (result.output.kind !== 'frames') throw new Error('精灵预览仅支持序列帧输出');
+
+      // 新结果准备就绪后再替换旧结果
+      const nextFrameCount = result.totalFrames;
+
+      const frames = result.output.frames;
+
+      if (config.spritePackaging === 'atlas' && config.format === 'png-sequence') {
+        const pages = await packFramesToAtlas({
+          frames,
+          baseName: 'sprite',
+          options: { maxSize: config.atlasMaxSize, padding: config.atlasPadding, trim: config.atlasTrim },
+        });
+
+        const pageBitmaps: ImageBitmap[] = [];
+        const frameRefs: SpriteFrameRef[] = [];
+
+        for (let pageIndex = 0; pageIndex < pages.length; pageIndex++) {
+          const p = pages[pageIndex];
+          // eslint-disable-next-line no-undef
+          const bmp = await createImageBitmap(p.imageBlob);
+          pageBitmaps.push(bmp);
+
+          const framesObj = p.json?.frames || {};
+          Object.entries(framesObj).forEach(([name, data]: any) => {
+            const m = String(name).match(/_(\d+)\.png$/);
+            if (!m) return;
+            const idx = parseInt(m[1], 10);
+            frameRefs[idx] = {
+              pageIndex,
+              frame: data.frame,
+              spriteSourceSize: data.spriteSourceSize,
+              sourceSize: data.sourceSize,
+            };
+          });
+        }
+
+        // 补齐缺失（理论不应缺）
+        for (let i = 0; i < result.totalFrames; i++) {
+          if (!frameRefs[i]) {
+            // fallback：用第一张页面的 1x1
+            frameRefs[i] = {
+              pageIndex: 0,
+              frame: { x: 0, y: 0, w: 1, h: 1 },
+              spriteSourceSize: { x: 0, y: 0, w: 1, h: 1 },
+              sourceSize: { w: config.width, h: config.height },
+            };
+          }
+        }
+
+        spritePagesRef.current = pageBitmaps;
+        spriteFramesRef.current = frameRefs;
+      } else {
+        // Sequence preview: one bitmap per frame, each as its own "page"
+        const pageBitmaps: ImageBitmap[] = [];
+        const frameRefs: SpriteFrameRef[] = [];
+
+        for (let i = 0; i < frames.length; i++) {
+          // eslint-disable-next-line no-undef
+          const bmp = await createImageBitmap(frames[i]);
+          pageBitmaps.push(bmp);
+          frameRefs.push({
+            pageIndex: i,
+            frame: { x: 0, y: 0, w: bmp.width, h: bmp.height },
+            spriteSourceSize: { x: 0, y: 0, w: bmp.width, h: bmp.height },
+            sourceSize: { w: bmp.width, h: bmp.height },
+          });
+        }
+
+        spritePagesRef.current = pageBitmaps;
+        spriteFramesRef.current = frameRefs;
+      }
+
+      // 现在替换旧结果：释放旧 bitmap
+      oldPages.forEach(b => { try { b.close(); } catch { } });
+      // 防止旧引用残留
+      if (spritePagesRef.current === oldPages) spritePagesRef.current = [];
+      if (spriteFramesRef.current === oldFrames) spriteFramesRef.current = [];
+      spriteFrameCountRef.current = nextFrameCount || oldFrameCount;
+      spritePlaybackRef.current.frameIndex = 0;
+      lastSpriteKeyRef.current = spritePreviewKey;
+      setAtlasPageIndex(0);
+
+      resizeSpriteCanvas();
+      setSpritePreviewState('ready');
+      if (spriteViewMode === 'atlas' && canAtlasPreview) {
+        renderAtlasPage(0);
+      } else {
+        startSpritePlayback();
+      }
+    } catch (e) {
+      if ((e as any)?.message === 'AbortError') return;
+      setSpritePreviewState('error');
+      setSpritePreviewError(e instanceof Error ? e.message : String(e));
+    }
+  }, [
+    activeItem,
+    canSpritePreview,
+    currentAnim,
+    config.atlasMaxSize,
+    config.atlasPadding,
+    config.atlasTrim,
+    config.backgroundColor,
+    config.duration,
+    config.fps,
+    config.format,
+    config.height,
+    config.spritePackaging,
+    config.width,
+    canAtlasPreview,
+    renderAtlasPage,
+    resizeSpriteCanvas,
+    startSpritePlayback,
+    stopSpritePlayback,
+    spritePreviewKey,
+    spriteViewMode,
+  ]);
+
   // Initialize Renderer once Spine is ready
   useEffect(() => {
     if (spineState !== 'ready' || !canvasRef.current || rendererRef.current) return;
@@ -169,7 +530,7 @@ export const PreviewArea: React.FC<PreviewAreaProps> = ({
     } catch (e) {
       console.error("Failed to initialize SpineRenderer", e);
       // 如果初始化失败，可能是因为脚本加载了但版本不对，或者 WebGL 不支持
-      setLoadingMessage("引擎初始化失败: WebGL 可能不可用");
+      setLoadingMessage("引擎初始化失败：图形加速可能不可用");
       setSpineState('error');
     }
 
@@ -186,12 +547,16 @@ export const PreviewArea: React.FC<PreviewAreaProps> = ({
     const el = containerRef.current;
 
     // ResizeObserver 能覆盖 PanelDivider 改变布局但不触发 window resize 的情况
-    const ro = new ResizeObserver(() => resizeToContainer());
+    const ro = new ResizeObserver(() => {
+      resizeToContainer();
+      resizeSpriteCanvas();
+    });
     ro.observe(el);
     resizeToContainer();
+    resizeSpriteCanvas();
 
     return () => ro.disconnect();
-  }, [resizeToContainer, spineState]);
+  }, [resizeToContainer, resizeSpriteCanvas, spineState]);
 
   // Update Renderer Settings
   useEffect(() => {
@@ -235,6 +600,26 @@ export const PreviewArea: React.FC<PreviewAreaProps> = ({
     loadAsset();
   }, [activeItem?.id, spineState]);
 
+  // 资源/动画/导出配置变化时，若已开启精灵预览则标记为需要重新生成
+  const lastSpriteKeyRef = useRef<string>('');
+  useEffect(() => {
+    if (!spritePreviewEnabled) return;
+    if (!canSpritePreview) return;
+    if (spritePreviewState === 'loading') return;
+    if (lastSpriteKeyRef.current && lastSpriteKeyRef.current === spritePreviewKey) return;
+    // 保持当前预览，但提示需要刷新（通过状态 idle 触发 UI）
+    setSpritePreviewState('idle');
+    setSpritePreviewError(null);
+  }, [spritePreviewEnabled, canSpritePreview, spritePreviewKey, spritePreviewState]);
+
+  useEffect(() => {
+    return () => {
+      clearSpritePreview();
+      offscreenRef.current?.dispose();
+      offscreenRef.current = null;
+    };
+  }, [clearSpritePreview]);
+
   // 键盘快捷键: 左右箭头切换动画
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -269,7 +654,7 @@ export const PreviewArea: React.FC<PreviewAreaProps> = ({
       <div className="h-14 bg-black/70 backdrop-blur-3xl border-b border-white/10 flex items-center px-6 justify-between shrink-0 z-20 shadow-xl">
         <div className="flex items-center gap-6">
           <div className="flex flex-col gap-1">
-            <span className="text-[9px] text-white/60 uppercase font-black tracking-[0.25em]">当前动画 (Current Animation)</span>
+            <span className="text-[9px] text-white/60 uppercase font-black tracking-[0.25em]">当前动画</span>
             <div className="relative group">
               <select
                 value={currentAnim}
@@ -299,7 +684,7 @@ export const PreviewArea: React.FC<PreviewAreaProps> = ({
 
           {/* Stats Display */}
           <div className="flex flex-col gap-1">
-            <span className="text-[9px] text-white/60 uppercase font-black tracking-[0.25em]">视口同步状态 (Sync)</span>
+            <span className="text-[9px] text-white/60 uppercase font-black tracking-[0.25em]">视口同步状态</span>
             <div className="flex items-center gap-3">
               <div className="flex items-center gap-2 text-emerald-400">
                 <div className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse shadow-[0_0_10px_rgba(52,211,153,0.5)]" />
@@ -341,19 +726,59 @@ export const PreviewArea: React.FC<PreviewAreaProps> = ({
               ? 'bg-white text-black'
               : 'bg-white/5 text-white/60 hover:text-white hover:bg-white/10'
               } disabled:opacity-30 disabled:cursor-not-allowed`}
-            title="Setup Pose（用于骨架/绑定检查）"
+            title="姿态模式（用于骨架/绑定检查）"
           >
-            Setup
+            姿态
           </button>
 
           <button
             onClick={handleExportManifestTemplate}
             disabled={!activeItem || animations.length === 0}
             className="px-3 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all bg-white/5 text-white/60 hover:text-white hover:bg-white/10 disabled:opacity-30 disabled:cursor-not-allowed flex items-center gap-2"
-            title="导出当前资产的 manifest 模板（动作模板映射）"
+            title="导出当前资产的清单模板（动作模板映射）"
           >
             <FileText size={14} className="text-indigo-400" />
-            Manifest
+            清单
+          </button>
+
+          <button
+            onClick={() => {
+              const next = !spritePreviewEnabled;
+              setSpritePreviewEnabled(next);
+              if (!next) {
+                // 仅暂停/隐藏：保留生成结果作为缓存，避免下次重复离屏渲染
+                stopSpritePlayback();
+                spriteAbortRef.current?.abort();
+                spriteAbortRef.current = null;
+                return;
+              }
+              if (canSpritePreview) {
+                // 默认：图集打包时优先展示“图集页”，否则展示“动画”
+                setSpriteViewMode(canAtlasPreview ? 'atlas' : 'anim');
+
+                // 如果缓存命中，直接显示
+                if (spritePreviewState === 'ready' && lastSpriteKeyRef.current === spritePreviewKey && spriteFramesRef.current.length > 0) {
+                  resizeSpriteCanvas();
+                  if (canAtlasPreview) {
+                    renderAtlasPage(atlasPageIndex);
+                  } else {
+                    startSpritePlayback();
+                  }
+                  return;
+                }
+
+                generateSpritePreview();
+              }
+            }}
+            disabled={!activeItem || !canSpritePreview}
+            className={`px-3 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all flex items-center gap-2 ${spritePreviewEnabled
+              ? 'bg-indigo-500 text-white'
+              : 'bg-white/5 text-white/60 hover:text-white hover:bg-white/10'
+              } disabled:opacity-30 disabled:cursor-not-allowed`}
+            title="预览当前导出配置下的精灵图（序列/图集）"
+          >
+            <ImageIcon size={14} className={spritePreviewEnabled ? 'text-white' : 'text-indigo-400'} />
+            精灵
           </button>
 
           <div className="w-px h-5 bg-white/10 mx-1"></div>
@@ -494,9 +919,107 @@ export const PreviewArea: React.FC<PreviewAreaProps> = ({
         {/* WebGL Canvas */}
         <canvas
           ref={canvasRef}
-          className="absolute inset-0 w-full h-full"
+          className={`absolute inset-0 w-full h-full ${spritePreviewEnabled ? 'opacity-0 pointer-events-none' : ''}`}
           style={{ outline: 'none' }}
         />
+
+        {/* Sprite Preview Canvas */}
+        <canvas
+          ref={spriteCanvasRef}
+          className={`absolute inset-0 w-full h-full ${spritePreviewEnabled ? '' : 'opacity-0 pointer-events-none'}`}
+          style={{ outline: 'none' }}
+        />
+
+        {spritePreviewEnabled && (
+          <div className="absolute top-4 left-4 z-50 flex items-center gap-2">
+            {spritePreviewState === 'ready' && canAtlasPreview && (
+              <div className="flex items-center gap-2 bg-black/60 backdrop-blur-xl border border-white/10 px-2 py-1.5 rounded-2xl text-[10px] font-black uppercase tracking-widest text-white/80">
+                <button
+                  onClick={() => {
+                    setSpriteViewMode('anim');
+                    startSpritePlayback();
+                  }}
+                  className={`px-2.5 py-1 rounded-xl transition-all ${spriteViewMode === 'anim'
+                    ? 'bg-white/15 text-white border border-white/20'
+                    : 'text-white/60 hover:text-white hover:bg-white/10'
+                    }`}
+                  title="按导出配置回填后播放（用于检查裁切/对齐）"
+                >
+                  动画
+                </button>
+                <button
+                  onClick={() => {
+                    setSpriteViewMode('atlas');
+                    stopSpritePlayback();
+                    renderAtlasPage(atlasPageIndex);
+                  }}
+                  className={`px-2.5 py-1 rounded-xl transition-all ${spriteViewMode === 'atlas'
+                    ? 'bg-white/15 text-white border border-white/20'
+                    : 'text-white/60 hover:text-white hover:bg-white/10'
+                    }`}
+                  title="查看拼接后的图集页（PNG）"
+                >
+                  图集
+                </button>
+
+                {spriteViewMode === 'atlas' && spritePagesRef.current.length > 1 && (
+                  <div className="flex items-center gap-1 ml-1">
+                    <button
+                      onClick={() => {
+                        const next = Math.max(0, atlasPageIndex - 1);
+                        setAtlasPageIndex(next);
+                        renderAtlasPage(next);
+                      }}
+                      className="w-8 h-7 rounded-xl bg-white/5 hover:bg-white/10 text-white/70 hover:text-white transition-all"
+                      title="上一页"
+                    >
+                      <ChevronLeft size={16} className="mx-auto" />
+                    </button>
+                    <div className="px-2 text-[10px] text-white/70 font-mono font-black select-none">
+                      {atlasPageIndex + 1}/{spritePagesRef.current.length}
+                    </div>
+                    <button
+                      onClick={() => {
+                        const next = Math.min(spritePagesRef.current.length - 1, atlasPageIndex + 1);
+                        setAtlasPageIndex(next);
+                        renderAtlasPage(next);
+                      }}
+                      className="w-8 h-7 rounded-xl bg-white/5 hover:bg-white/10 text-white/70 hover:text-white transition-all"
+                      title="下一页"
+                    >
+                      <ChevronRight size={16} className="mx-auto" />
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {spritePreviewState === 'loading' && (
+              <div className="flex items-center gap-2 bg-black/60 backdrop-blur-xl border border-white/10 px-3 py-2 rounded-2xl text-[10px] font-black uppercase tracking-widest text-white/80">
+                <Loader2 size={14} className="animate-spin text-indigo-400" />
+                生成精灵预览中…
+              </div>
+            )}
+            {spritePreviewState === 'idle' && (
+              <button
+                onClick={() => {
+                  generateSpritePreview();
+                }}
+                className="flex items-center gap-2 bg-indigo-500/20 hover:bg-indigo-500/30 border border-indigo-500/30 px-3 py-2 rounded-2xl text-[10px] font-black uppercase tracking-widest text-indigo-100 transition-all"
+                title="导出配置已变化，点击重新生成精灵预览"
+              >
+                <RefreshCw size={14} className="text-indigo-200" />
+                重新生成
+              </button>
+            )}
+            {spritePreviewState === 'error' && (
+              <div className="flex items-center gap-2 bg-red-500/10 backdrop-blur-xl border border-red-500/20 px-3 py-2 rounded-2xl text-[10px] font-black uppercase tracking-widest text-red-200">
+                <AlertCircle size={14} className="text-red-300" />
+                {spritePreviewError || '精灵预览失败'}
+              </div>
+            )}
+          </div>
+        )}
 
         {spineState === 'loading' && (
           <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/90 backdrop-blur-2xl z-50 text-white/70">
@@ -514,7 +1037,7 @@ export const PreviewArea: React.FC<PreviewAreaProps> = ({
               <WifiOff className="text-red-500" size={56} />
             </div>
             <p className="text-4xl font-black text-white mb-6 tracking-tight">连接协议异常</p>
-            <p className="text-white/60 max-w-sm text-center mb-12 text-base leading-relaxed">环境初始化过程中发生冲突，无法稳定加载 Spine WebGL 运行时环境。</p>
+            <p className="text-white/60 max-w-sm text-center mb-12 text-base leading-relaxed">环境初始化过程中发生冲突，无法稳定加载渲染运行时环境。</p>
 
             <button
               onClick={handleRetryLoad}

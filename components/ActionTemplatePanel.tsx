@@ -1,7 +1,7 @@
 import React, { useMemo, useRef, useState } from 'react';
 import { AnimationItem, ActionHubNamingManifest, DirectionSet, ActionTimingType } from '../types';
 import { normalizeCanonicalName } from '../services/actionHubNaming';
-import { FileDown, FileUp, Trash2, Wand2, AlertTriangle, Search, X } from 'lucide-react';
+import { FileDown, FileUp, Trash2, Wand2, AlertTriangle, Search, X, Sparkles, Save } from 'lucide-react';
 
 interface ActionTemplatePanelProps {
   activeItem: AnimationItem | null;
@@ -15,11 +15,30 @@ interface ActionTemplatePanelProps {
   };
   disabled?: boolean;
   onUpdateManifest: (manifest: ActionHubNamingManifest | undefined) => void;
+  onSaveToLocal?: () => void;
 }
 
 const buildAssetKey = (item: AnimationItem) => item.files.basePath || item.name;
 
 const getMappingsCount = (manifest?: ActionHubNamingManifest) => Object.keys(manifest?.mappings || {}).length;
+
+const labelDir = (dir: DirectionSet) => {
+  switch (dir) {
+    case 'none': return '无';
+    case 'LR': return '左右';
+    case '4dir': return '四方向';
+    case '8dir': return '八方向';
+    default: return dir;
+  }
+};
+
+const labelType = (type: ActionTimingType) => {
+  switch (type) {
+    case 'loop': return '循环';
+    case 'once': return '单次';
+    default: return type;
+  }
+};
 
 const downloadJson = (data: any, filename: string) => {
   const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
@@ -38,6 +57,92 @@ const parseManifest = async (file: File): Promise<ActionHubNamingManifest> => {
   return JSON.parse(text);
 };
 
+const classifyAnimation = (anim: string, defaults: { category: string; dir: DirectionSet; type: ActionTimingType }) => {
+  const raw = (anim || '').trim();
+  if (raw.includes('/')) {
+    return {
+      name: normalizeCanonicalName(raw),
+      dir: defaults.dir,
+      type: defaults.type,
+    };
+  }
+
+  const lower = raw.toLowerCase();
+  const tokens = lower.split(/[^a-z0-9]+/g).filter(Boolean);
+  const has = (...t: string[]) => t.some(x => tokens.includes(x) || lower.includes(x));
+
+  const variantMatch = lower.match(/(?:_|-)(\d{2,})$/);
+  const variant = variantMatch?.[1] || '01';
+
+  let category = defaults.category || 'misc';
+  let action = raw;
+  let type: ActionTimingType = defaults.type;
+  let dir: DirectionSet = defaults.dir;
+
+  if (has('idle', 'stand')) {
+    category = 'locomotion';
+    action = 'idle';
+    type = 'loop';
+    dir = defaults.dir;
+  } else if (has('walk')) {
+    category = 'locomotion';
+    action = 'walk';
+    type = 'loop';
+    dir = defaults.dir;
+  } else if (has('run')) {
+    category = 'locomotion';
+    action = 'run';
+    type = 'loop';
+    dir = defaults.dir;
+  } else if (has('jump')) {
+    category = 'locomotion';
+    action = 'jump';
+    type = 'once';
+    dir = defaults.dir;
+  } else if (has('fall')) {
+    category = 'locomotion';
+    action = 'fall';
+    type = 'loop';
+    dir = defaults.dir;
+  } else if (has('land')) {
+    category = 'locomotion';
+    action = 'land';
+    type = 'once';
+    dir = defaults.dir;
+  } else if (has('attack', 'atk', 'slash', 'shoot', 'fire')) {
+    category = 'combat';
+    type = 'once';
+    dir = defaults.dir;
+    if (has('heavy', 'strong', 'power')) action = 'atk_heavy';
+    else action = 'atk_light';
+    if (has('shoot', 'fire')) action = 'shoot';
+  } else if (has('hit', 'hurt', 'damage', 'impact')) {
+    category = 'hit';
+    type = 'once';
+    dir = defaults.dir;
+    if (has('back', 'rear')) action = 'react_back';
+    else action = 'react_front';
+  } else if (has('death', 'die')) {
+    category = 'hit';
+    action = 'death';
+    type = 'once';
+    dir = defaults.dir;
+  } else if (has('use', 'interact', 'pickup', 'grab', 'open')) {
+    category = 'interaction';
+    action = 'use';
+    type = 'once';
+    dir = 'none';
+  } else if (has('wave', 'taunt', 'dance', 'victory', 'win', 'emote')) {
+    category = 'emote';
+    action = has('wave') ? 'wave' : has('dance') ? 'dance' : has('victory', 'win') ? 'victory' : 'taunt';
+    type = has('dance') ? 'loop' : 'once';
+    dir = 'none';
+  }
+
+  const normalized = normalizeCanonicalName(`${category}/${action}_${variant}`);
+  return { name: normalized, dir, type };
+};
+
 export const ActionTemplatePanel: React.FC<ActionTemplatePanelProps> = ({
   activeItem,
   animationNames,
@@ -45,10 +150,12 @@ export const ActionTemplatePanel: React.FC<ActionTemplatePanelProps> = ({
   defaults,
   disabled = false,
   onUpdateManifest,
+  onSaveToLocal,
 }) => {
   const [search, setSearch] = useState('');
   const [onlyUnmapped, setOnlyUnmapped] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [savedHint, setSavedHint] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const assetKey = activeItem ? buildAssetKey(activeItem) : '';
@@ -165,6 +272,26 @@ export const ActionTemplatePanel: React.FC<ActionTemplatePanelProps> = ({
     onUpdateManifest(next);
   };
 
+  const autoClassifyForAsset = () => {
+    if (!activeItem) return;
+    const next = ensureManifest();
+    const newMappings: Record<string, any> = { ...(next.mappings || {}) };
+    animationNames.forEach(anim => {
+      const key = `${assetKey}::${anim}`;
+      const prev = newMappings[key] || {};
+      const suggestion = classifyAnimation(anim, { category: defaults.category, dir: defaults.dir, type: defaults.type });
+      newMappings[key] = {
+        ...prev,
+        // 只在未显式设置时填充，避免覆盖手工修改
+        ...(prev.name ? {} : { name: suggestion.name }),
+        ...(prev.dir ? {} : { dir: suggestion.dir }),
+        ...(prev.type ? {} : { type: suggestion.type }),
+      };
+    });
+    next.mappings = newMappings;
+    onUpdateManifest(next);
+  };
+
   const exportManifest = () => {
     const out = ensureManifest();
     out.generated_date = new Date().toISOString();
@@ -245,7 +372,7 @@ export const ActionTemplatePanel: React.FC<ActionTemplatePanelProps> = ({
               <span className="text-white/20 px-2">/</span>
               动画: <span className="text-white/80">{animationNames.length}</span>
               <span className="text-white/20 px-2">/</span>
-              manifest mappings: <span className="text-indigo-400">{manifestCount}</span>
+              清单映射: <span className="text-indigo-400">{manifestCount}</span>
             </>
           ) : (
             <>请选择一个资产以编辑动作模板</>
@@ -253,6 +380,20 @@ export const ActionTemplatePanel: React.FC<ActionTemplatePanelProps> = ({
         </div>
 
         <div className="flex items-center gap-2">
+          <button
+            onClick={() => {
+              onSaveToLocal?.();
+              setSavedHint('已保存');
+              window.setTimeout(() => setSavedHint(null), 1200);
+            }}
+            disabled={disabled}
+            className="px-3 py-2 rounded-2xl bg-white/5 border border-white/10 text-[10px] font-black uppercase tracking-widest text-white/60 hover:bg-white/10 hover:border-white/20 hover:text-white transition-all disabled:opacity-30 disabled:cursor-not-allowed flex items-center gap-2"
+            title="保存到本地（刷新后自动恢复，无需重复导出/导入）"
+          >
+            <Save size={14} className="text-indigo-400" />
+            {savedHint || '保存'}
+          </button>
+
           <input
             ref={fileInputRef}
             type="file"
@@ -269,7 +410,7 @@ export const ActionTemplatePanel: React.FC<ActionTemplatePanelProps> = ({
             onClick={() => fileInputRef.current?.click()}
             disabled={disabled}
             className="px-3 py-2 rounded-2xl bg-white/5 border border-white/10 text-[10px] font-black uppercase tracking-widest text-white/60 hover:bg-white/10 hover:border-white/20 hover:text-white transition-all disabled:opacity-30 disabled:cursor-not-allowed flex items-center gap-2"
-            title="导入 manifest.json"
+            title="导入清单文件"
           >
             <FileUp size={14} className="text-indigo-400" />
             导入
@@ -279,7 +420,7 @@ export const ActionTemplatePanel: React.FC<ActionTemplatePanelProps> = ({
             onClick={exportManifest}
             disabled={disabled}
             className="px-3 py-2 rounded-2xl bg-white/5 border border-white/10 text-[10px] font-black uppercase tracking-widest text-white/60 hover:bg-white/10 hover:border-white/20 hover:text-white transition-all disabled:opacity-30 disabled:cursor-not-allowed flex items-center gap-2"
-            title="导出 manifest.json"
+            title="导出清单文件"
           >
             <FileDown size={14} className="text-indigo-400" />
             导出
@@ -292,28 +433,38 @@ export const ActionTemplatePanel: React.FC<ActionTemplatePanelProps> = ({
           onClick={generateDefaultsForAsset}
           disabled={disabled || !activeItem}
           className="px-3 py-2 rounded-2xl bg-indigo-500/20 border border-indigo-500/30 text-[10px] font-black uppercase tracking-widest text-indigo-200 hover:bg-indigo-500/30 transition-all disabled:opacity-30 disabled:cursor-not-allowed flex items-center gap-2"
-          title="为该资产所有动画生成默认 name 映射"
+          title="为该资产所有动画生成默认动作名映射"
         >
           <Wand2 size={14} />
           生成映射
         </button>
 
         <button
+          onClick={autoClassifyForAsset}
+          disabled={disabled || !activeItem}
+          className="px-3 py-2 rounded-2xl bg-indigo-500/10 border border-indigo-500/20 text-[10px] font-black uppercase tracking-widest text-indigo-100 hover:bg-indigo-500/15 transition-all disabled:opacity-30 disabled:cursor-not-allowed flex items-center gap-2"
+          title="按动画名关键字自动归类并推断 循环/单次（仅填充空值）"
+        >
+          <Sparkles size={14} />
+          智能归类
+        </button>
+
+        <button
           onClick={() => applyBatch({ dir: defaults.dir })}
           disabled={disabled || !activeItem || rows.length === 0}
           className="px-3 py-2 rounded-2xl bg-white/5 border border-white/10 text-[10px] font-black uppercase tracking-widest text-white/60 hover:bg-white/10 hover:border-white/20 hover:text-white transition-all disabled:opacity-30 disabled:cursor-not-allowed"
-          title="批量设置 dir 为默认值"
+          title="批量设置方向为默认值"
         >
-          批量Dir=默认
+          批量方向=默认
         </button>
 
         <button
           onClick={() => applyBatch({ type: defaults.type })}
           disabled={disabled || !activeItem || rows.length === 0}
           className="px-3 py-2 rounded-2xl bg-white/5 border border-white/10 text-[10px] font-black uppercase tracking-widest text-white/60 hover:bg-white/10 hover:border-white/20 hover:text-white transition-all disabled:opacity-30 disabled:cursor-not-allowed"
-          title="批量设置 type 为默认值"
+          title="批量设置类型为默认值"
         >
-          批量Type=默认
+          批量类型=默认
         </button>
 
         <div className="flex-1" />
@@ -331,7 +482,7 @@ export const ActionTemplatePanel: React.FC<ActionTemplatePanelProps> = ({
 
       {error && (
         <div className="mx-6 mb-4 text-[10px] font-bold text-red-300 bg-red-500/10 border border-red-500/20 rounded-2xl p-3">
-          manifest 解析失败: {error}
+          清单解析失败: {error}
         </div>
       )}
 
@@ -362,7 +513,7 @@ export const ActionTemplatePanel: React.FC<ActionTemplatePanelProps> = ({
               >
                 <div className="flex items-start gap-4">
                   <div className="flex flex-col min-w-0 flex-1 gap-3">
-                    <div className="flex items-center justify-between gap-3">
+                      <div className="flex items-center justify-between gap-3">
                       <div className="min-w-0">
                         <div className="text-[11px] font-black text-white truncate">{r.anim}</div>
                         <div className="text-[9px] font-mono font-bold text-white/40 truncate">{r.key}</div>
@@ -380,7 +531,7 @@ export const ActionTemplatePanel: React.FC<ActionTemplatePanelProps> = ({
 
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                       <div className="md:col-span-2 flex flex-col gap-2">
-                        <span className="text-[9px] text-white/50 font-black uppercase tracking-widest">name（规范动作ID）</span>
+                        <span className="text-[9px] text-white/50 font-black uppercase tracking-widest">动作名（规范）</span>
                         <input
                           value={r.mapping?.name || ''}
                           onChange={(e) => upsertMapping(r.key, { name: e.target.value })}
@@ -400,7 +551,7 @@ export const ActionTemplatePanel: React.FC<ActionTemplatePanelProps> = ({
 
                       <div className="flex flex-col gap-3">
                         <div className="flex flex-col gap-2">
-                          <span className="text-[9px] text-white/50 font-black uppercase tracking-widest">dir</span>
+                          <span className="text-[9px] text-white/50 font-black uppercase tracking-widest">方向</span>
                           <select
                             value={(r.mapping?.dir || '') as any}
                             onChange={(e) => {
@@ -410,16 +561,16 @@ export const ActionTemplatePanel: React.FC<ActionTemplatePanelProps> = ({
                             disabled={disabled}
                             className="bg-black/40 border border-white/10 rounded-2xl px-4 py-2 text-[11px] text-white font-mono font-bold focus:outline-none focus:ring-1 focus:ring-indigo-500/50 disabled:opacity-30"
                           >
-                            <option value="">(默认: {r.effectiveDir})</option>
-                            <option value="none">none</option>
-                            <option value="LR">LR</option>
-                            <option value="4dir">4dir</option>
-                            <option value="8dir">8dir</option>
+                            <option value="">(默认: {labelDir(r.effectiveDir)})</option>
+                            <option value="none">无</option>
+                            <option value="LR">左右</option>
+                            <option value="4dir">四方向</option>
+                            <option value="8dir">八方向</option>
                           </select>
                         </div>
 
                         <div className="flex flex-col gap-2">
-                          <span className="text-[9px] text-white/50 font-black uppercase tracking-widest">type</span>
+                          <span className="text-[9px] text-white/50 font-black uppercase tracking-widest">类型</span>
                           <select
                             value={(r.mapping?.type || '') as any}
                             onChange={(e) => {
@@ -429,9 +580,9 @@ export const ActionTemplatePanel: React.FC<ActionTemplatePanelProps> = ({
                             disabled={disabled}
                             className="bg-black/40 border border-white/10 rounded-2xl px-4 py-2 text-[11px] text-white font-mono font-bold focus:outline-none focus:ring-1 focus:ring-indigo-500/50 disabled:opacity-30"
                           >
-                            <option value="">(默认: {r.effectiveType})</option>
-                            <option value="once">once</option>
-                            <option value="loop">loop</option>
+                            <option value="">(默认: {labelType(r.effectiveType)})</option>
+                            <option value="once">单次</option>
+                            <option value="loop">循环</option>
                           </select>
                         </div>
                       </div>
@@ -458,4 +609,3 @@ export const ActionTemplatePanel: React.FC<ActionTemplatePanelProps> = ({
 function sanitizeFilename(name: string) {
   return (name || 'asset').replace(/[<>:"/\\|?*\x00-\x1F]/g, '_').trim() || 'asset';
 }
-

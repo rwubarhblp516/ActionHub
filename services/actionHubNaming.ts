@@ -26,7 +26,7 @@ export interface ActionHubDerivedPaths {
   canonicalName: string;
   baseName: string; // action_variant_dir_type_fps_frames
   outputFilePath?: string; // for video
-  outputDirPath?: string; // for frames
+  outputBasePath?: string; // for sprite: base path without ext; sequence uses this as directory, atlas uses this as file base
   metadataPath: string;
 }
 
@@ -203,14 +203,13 @@ export function buildDerivedPaths(params: {
   const metadataPath = `metadata/derived/${delivery}/${safeView}/${spec.canonicalName}.json`;
 
   if (delivery === 'sprite') {
-    const ext = framesExt || 'png';
     return {
       delivery,
       view: spec.view,
       category: safeCategory,
       canonicalName: spec.canonicalName,
       baseName,
-      outputDirPath: `sprite/${safeView}/${safeCategory}/${baseName}`,
+      outputBasePath: `sprite/${safeView}/${safeCategory}/${baseName}`,
       metadataPath,
     };
   }

@@ -23,6 +23,10 @@ export interface ExportConfig {
   duration: number; // seconds; 0 表示使用动画原始时长
   scale: number; // 0.1 to 3.0
   backgroundColor: string; // Hex
+  spritePackaging: 'sequence' | 'atlas';
+  atlasMaxSize: number; // e.g. 2048/4096
+  atlasPadding: number; // pixels
+  atlasTrim: boolean; // trim transparent pixels
   naming: ActionHubNamingConfig;
 }
 
