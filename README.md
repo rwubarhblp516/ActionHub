@@ -1,20 +1,39 @@
-<div align="center">
-<img width="1200" height="475" alt="GHBanner" src="https://github.com/user-attachments/assets/0aa67016-6eaf-458a-adb2-6e31a0763ed6" />
-</div>
+# ActionHub
 
-# Run and deploy your AI Studio app
+ActionHub is a Vite + React + TypeScript app for previewing Spine assets and exporting animations to video or image sequences.
 
-This contains everything you need to run your app locally.
+## Requirements
+- Node.js (LTS recommended)
 
-View your app in AI Studio: https://ai.studio/apps/drive/1hglht_YcUcuraaQ_G2ZxHrFT6xH2mym9
-
-## Run Locally
-
-**Prerequisites:**  Node.js
-
-
+## Quick Start
 1. Install dependencies:
    `npm install`
-2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
-3. Run the app:
+2. Configure API key (if required by the app):
+   - Create `.env.local` and set `GEMINI_API_KEY=...`
+3. Run the dev server:
    `npm run dev`
+
+## Scripts
+- `npm run dev`: start the local dev server.
+- `npm run build`: build a production bundle into `dist/`.
+- `npm run preview`: serve the production build locally.
+
+## Project Structure
+- `index.html`, `index.tsx`: app entry points.
+- `App.tsx`: main app shell and state orchestration.
+- `components/`: UI panels and layout components.
+- `services/`: export pipeline, renderers, encoders, and helpers.
+- `constants.ts`, `types.ts`: shared defaults and TypeScript types.
+- `public/`: static assets.
+
+## Asset Standards (ActionHub)
+The ActionHub standards and schemas live under `docs/actionhub/`:
+- Naming and directory rules: `docs/actionhub/standards/naming_rules.md`
+- UE batch checklist: `docs/actionhub/standards/ue_batch_checklist.md`
+- UE view profiles: `docs/actionhub/standards/ue_view_profiles.md`
+- Metadata schema: `docs/actionhub/schemas/metadata_schema.json`
+- Events dictionary: `docs/actionhub/schemas/events_dictionary.json`
+
+## Notes
+- No automated test framework is configured yet.
+- Keep secrets out of the repo; use `.env.local` for local configuration.

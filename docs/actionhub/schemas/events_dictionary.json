@@ -1,0 +1,119 @@
+{
+  "version": "1.0",
+  "generated_date": "2026-01-08",
+  "principles": [
+    "事件以语义为主，与视角/交付无关；视角/交付派生时不得改变事件的时间位置，只可映射帧索引。",
+    "同一语义事件在不同动作中尽量复用同名（便于程序侧统一处理）。",
+    "事件建议绑定到 frame index（离散帧），同时可保留 normalized_time（0-1）以适配不同采样率。"
+  ],
+  "event_types": [
+    {
+      "type": "hit",
+      "desc": "造成伤害/命中判定窗口的关键帧（或窗口起点）",
+      "payload_fields": [
+        "hitbox_id",
+        "damage_profile",
+        "strength",
+        "notes"
+      ]
+    },
+    {
+      "type": "hit_window",
+      "desc": "命中窗口（起止）",
+      "payload_fields": [
+        "start_frame",
+        "end_frame",
+        "hitbox_id",
+        "damage_profile"
+      ]
+    },
+    {
+      "type": "footstep",
+      "desc": "脚步落地",
+      "payload_fields": [
+        "foot",
+        "surface",
+        "volume"
+      ]
+    },
+    {
+      "type": "whoosh",
+      "desc": "挥舞音效/风声",
+      "payload_fields": [
+        "sfx_id",
+        "volume"
+      ]
+    },
+    {
+      "type": "spawn_vfx",
+      "desc": "生成特效",
+      "payload_fields": [
+        "vfx_id",
+        "attach_to",
+        "offset",
+        "layer"
+      ]
+    },
+    {
+      "type": "camera_shake",
+      "desc": "镜头震动",
+      "payload_fields": [
+        "preset",
+        "intensity",
+        "duration_ms"
+      ]
+    },
+    {
+      "type": "invincible",
+      "desc": "无敌窗口（起止）",
+      "payload_fields": [
+        "start_frame",
+        "end_frame",
+        "reason"
+      ]
+    },
+    {
+      "type": "cancel",
+      "desc": "取消窗口（如可接下一段连招）",
+      "payload_fields": [
+        "start_frame",
+        "end_frame",
+        "cancel_to"
+      ]
+    },
+    {
+      "type": "marker",
+      "desc": "通用标记（调试/对齐用）",
+      "payload_fields": [
+        "name",
+        "value"
+      ]
+    }
+  ],
+  "recommended_defaults": {
+    "fps": 30,
+    "frame_buckets": {
+      "idle_loop": [
+        16,
+        24
+      ],
+      "walk_run_loop": [
+        12,
+        16,
+        24
+      ],
+      "attack_once": [
+        8,
+        10,
+        12,
+        16
+      ],
+      "hit_react": [
+        6,
+        8,
+        10,
+        12
+      ]
+    }
+  }
+}

@@ -1,5 +1,5 @@
 {
-  "name": "Spine导出大师 (Spine Video Exporter)",
-  "description": "专业的Spine 2D动画预览与视频批量导出工具。支持拖拽文件夹识别、实时预览、自定义分辨率与帧率，以及WebM格式的高效批量导出。",
+  "name": "ActionHub",
+  "description": "ActionHub：专业的Spine 2D动画预览与视频批量导出工具。支持拖拽文件夹识别、实时预览、自定义分辨率与帧率，以及WebM格式的高效批量导出。",
   "requestFramePermissions": []
 }

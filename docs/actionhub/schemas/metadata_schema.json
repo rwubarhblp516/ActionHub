@@ -1,0 +1,258 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ActionHub Metadata Schema",
+  "type": "object",
+  "required": [
+    "name",
+    "version",
+    "master",
+    "timing",
+    "tags",
+    "events"
+  ],
+  "properties": {
+    "version": {
+      "type": "string",
+      "description": "metadata schema version, e.g., 1.0"
+    },
+    "name": {
+      "type": "string",
+      "description": "canonical action name without delivery/view prefix, e.g., locomotion/run_01"
+    },
+    "source": {
+      "type": "object",
+      "description": "provenance and license tracking",
+      "properties": {
+        "vendor": {
+          "type": "string"
+        },
+        "pack": {
+          "type": "string"
+        },
+        "origin_file": {
+          "type": "string"
+        },
+        "license": {
+          "type": "string"
+        },
+        "purchase_ref": {
+          "type": "string"
+        },
+        "notes": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "master": {
+      "type": "object",
+      "required": [
+        "standard_skeleton",
+        "asset_id"
+      ],
+      "properties": {
+        "standard_skeleton": {
+          "type": "string",
+          "enum": [
+            "UE_Manny"
+          ]
+        },
+        "asset_id": {
+          "type": "string",
+          "description": "UE asset path or internal GUID"
+        },
+        "view_variant_of": {
+          "type": "string",
+          "description": "if this is a view-specific variant, reference canonical master action id"
+        }
+      },
+      "additionalProperties": false
+    },
+    "timing": {
+      "type": "object",
+      "required": [
+        "fps",
+        "frames",
+        "type",
+        "loop"
+      ],
+      "properties": {
+        "fps": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "frames": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "loop",
+            "once"
+          ]
+        },
+        "loop": {
+          "type": "boolean"
+        },
+        "root_motion": {
+          "type": "string",
+          "enum": [
+            "in_place",
+            "root_motion",
+            "n/a"
+          ],
+          "default": "n/a"
+        },
+        "frame_bucket": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "directions": {
+      "type": "object",
+      "description": "direction set and mirroring rules",
+      "properties": {
+        "dir_set": {
+          "type": "string",
+          "enum": [
+            "LR",
+            "4dir",
+            "8dir",
+            "none"
+          ],
+          "default": "none"
+        },
+        "mirror_policy": {
+          "type": "string",
+          "enum": [
+            "allow_lr_mirror",
+            "no_mirror",
+            "mirror_allowed_except_shield"
+          ],
+          "default": "allow_lr_mirror"
+        }
+      },
+      "additionalProperties": false
+    },
+    "tags": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "events": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "type"
+        ],
+        "properties": {
+          "type": {
+            "type": "string"
+          },
+          "frame": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "start_frame": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "end_frame": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "normalized_time": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          },
+          "payload": {
+            "type": "object"
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "views": {
+      "type": "object",
+      "description": "per-view derived overrides (optional)",
+      "properties": {
+        "VIEW_SIDE": {
+          "$ref": "#/$defs/viewOverride"
+        },
+        "VIEW_TOP": {
+          "$ref": "#/$defs/viewOverride"
+        },
+        "VIEW_ISO45": {
+          "$ref": "#/$defs/viewOverride"
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "$defs": {
+    "viewOverride": {
+      "type": "object",
+      "properties": {
+        "direction_set": {
+          "type": "string",
+          "enum": [
+            "LR",
+            "4dir",
+            "8dir",
+            "none"
+          ]
+        },
+        "projection_rules": {
+          "type": "object",
+          "properties": {
+            "use_orthographic": {
+              "type": "boolean"
+            },
+            "limit_torso_twist_deg": {
+              "type": "number"
+            },
+            "limit_arm_twist_deg": {
+              "type": "number"
+            },
+            "notes": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        },
+        "pivot_rule": {
+          "type": "object",
+          "properties": {
+            "method": {
+              "type": "string",
+              "enum": [
+                "feet_contact",
+                "bbox_bottom_center",
+                "custom_marker"
+              ]
+            },
+            "marker_bone": {
+              "type": "string"
+            },
+            "marker_offset": {
+              "type": "array",
+              "items": {
+                "type": "number"
+              },
+              "minItems": 2,
+              "maxItems": 2
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}
