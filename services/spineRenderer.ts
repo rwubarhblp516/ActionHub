@@ -49,6 +49,7 @@ export class SpineRenderer {
   };
   private setupPoseMode: boolean = false;
   private wasPlayingBeforeSetup: boolean = true;
+  private attachmentDefaults = new WeakMap<any, { x: number; y: number; scaleX: number; scaleY: number; rotation: number }>();
 
   // Spine 3.8 兼容层
   spineWebGL: any = null;
@@ -571,6 +572,49 @@ export class SpineRenderer {
   setTargetFPS(fps: number) {
     this.targetFPS = fps;
     this.frameInterval = 1000 / fps;
+  }
+
+  applyAttachmentOverrides(overrides: Record<string, { offset_x: number; offset_y: number; scale_x: number; scale_y: number; rotation: number }>) {
+    if (!this.skeleton || !this.skeleton.data) return;
+    const skins = this.skeleton.data.skins || [];
+    const slots = this.skeleton.data.slots || [];
+
+    skins.forEach((skin: any) => {
+      const entries = skin.getAttachments ? skin.getAttachments() : [];
+      entries.forEach((entry: any) => {
+        const slotName = slots[entry.slotIndex]?.name || `slot_${entry.slotIndex}`;
+        const key = `${slotName}::${entry.name}`;
+        const attachment = entry.attachment;
+        if (!attachment) return;
+
+        const defaults = this.attachmentDefaults.get(attachment) || {
+          x: attachment.x || 0,
+          y: attachment.y || 0,
+          scaleX: attachment.scaleX ?? 1,
+          scaleY: attachment.scaleY ?? 1,
+          rotation: attachment.rotation || 0,
+        };
+        this.attachmentDefaults.set(attachment, defaults);
+
+        // reset to defaults before applying override
+        attachment.x = defaults.x;
+        attachment.y = defaults.y;
+        attachment.scaleX = defaults.scaleX;
+        attachment.scaleY = defaults.scaleY;
+        attachment.rotation = defaults.rotation;
+
+        const override = overrides[key];
+        if (!override) return;
+        attachment.x = defaults.x + (override.offset_x || 0);
+        attachment.y = defaults.y + (override.offset_y || 0);
+        attachment.scaleX = defaults.scaleX * (override.scale_x || 1);
+        attachment.scaleY = defaults.scaleY * (override.scale_y || 1);
+        attachment.rotation = defaults.rotation + (override.rotation || 0);
+      });
+    });
+
+    this.skeleton.setToSetupPose();
+    this.skeleton.updateWorldTransform();
   }
 
   dispose() {

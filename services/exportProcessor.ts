@@ -23,8 +23,14 @@ const buildDerivedMetadata = (params: {
     frames: number;
     type: 'loop' | 'once';
     dir: string;
+    template?: {
+        templateId: string;
+        templateVersion: string;
+        skinId?: string;
+        skeletonSignature?: string;
+    };
 }) => {
-    const { canonicalName, view, assetId, fps, frames, type, dir } = params;
+    const { canonicalName, view, assetId, fps, frames, type, dir, template } = params;
     return {
         version: '1.0',
         name: canonicalName,
@@ -32,6 +38,12 @@ const buildDerivedMetadata = (params: {
             standard_skeleton: 'UE_Manny',
             asset_id: assetId
         },
+        template: template ? {
+            template_id: template.templateId,
+            template_version: template.templateVersion,
+            skin_id: template.skinId,
+            skeleton_signature: template.skeletonSignature
+        } : undefined,
         timing: {
             fps,
             frames,
@@ -197,6 +209,14 @@ export async function processExportWithOffscreen(
                         framesExt: result.output.kind === 'frames' ? result.output.imageExt : undefined
                     });
 
+                    const templateContext = config.templateContext;
+                    const templateMeta = templateContext ? {
+                        templateId: templateContext.templateId,
+                        templateVersion: templateContext.templateVersion,
+                        skinId: templateContext.skinId,
+                        skeletonSignature: templateContext.skeletonSignature
+                    } : undefined;
+
                     if (result.output.kind === 'video' && derived.outputFilePath) {
                         zip.file(derived.outputFilePath, result.output.blob);
                     } else if (result.output.kind === 'frames' && derived.outputBasePath) {
@@ -220,7 +240,11 @@ export async function processExportWithOffscreen(
                                 atlasPages: pagesCount,
                                 metadata: derived.metadataPath,
                                 fps: config.fps,
-                                frames: result.totalFrames
+                                frames: result.totalFrames,
+                                template_id: templateMeta?.templateId,
+                                template_version: templateMeta?.templateVersion,
+                                skin_id: templateMeta?.skinId,
+                                skeleton_signature: templateMeta?.skeletonSignature
                             });
                         } else {
                             addFramesToZip({
@@ -240,7 +264,8 @@ export async function processExportWithOffscreen(
                         fps: config.fps,
                         frames: result.totalFrames,
                         type: spec.type,
-                        dir: spec.dir
+                        dir: spec.dir,
+                        template: templateMeta
                     });
                     zip.file(derived.metadataPath, JSON.stringify(metadata, null, 2));
 
@@ -254,7 +279,11 @@ export async function processExportWithOffscreen(
                             output: derived.outputFilePath || derived.outputBasePath,
                             metadata: derived.metadataPath,
                             fps: config.fps,
-                            frames: result.totalFrames
+                            frames: result.totalFrames,
+                            template_id: templateMeta?.templateId,
+                            template_version: templateMeta?.templateVersion,
+                            skin_id: templateMeta?.skinId,
+                            skeleton_signature: templateMeta?.skeletonSignature
                         });
                     }
                 } else {

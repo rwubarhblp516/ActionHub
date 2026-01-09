@@ -138,6 +138,16 @@ export const Sidebar: React.FC<SidebarProps> = ({
                         <span className={`text-[10px] font-bold uppercase tracking-tighter transition-colors ${selectedIds.has(item.id) ? 'text-white/70' : 'text-white/40'}`}>
                           运行时 3.8
                         </span>
+                        {item.kind === 'assembly' && (
+                          <span className="px-2 py-0.5 rounded-full bg-indigo-500/20 text-indigo-200 text-[8px] font-black uppercase tracking-widest border border-indigo-500/30">
+                            装配预览
+                          </span>
+                        )}
+                        {item.kind === 'template' && (
+                          <span className="px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-200 text-[8px] font-black uppercase tracking-widest border border-emerald-500/30">
+                            模板
+                          </span>
+                        )}
                         {item.status === 'completed' && <Check className="text-emerald-400" size={12} strokeWidth={3} />}
                         {item.status === 'exporting' && <div className="w-2 h-2 rounded-full bg-indigo-400 animate-pulse" />}
                       </div>

@@ -14,6 +14,7 @@ interface PreviewAreaProps {
   onUpdateConfig: (cfg: Partial<ExportConfig>) => void;
   onRendererReady: (renderer: SpineRenderer) => void;
   onAnimationsLoaded?: (itemId: string, animationNames: string[]) => void;
+  attachmentOverrides?: Record<string, { offset_x: number; offset_y: number; scale_x: number; scale_y: number; rotation: number }>;
 }
 
 // Spine 3.8 运行时 CDN 列表
@@ -28,7 +29,8 @@ export const PreviewArea: React.FC<PreviewAreaProps> = ({
   config,
   onUpdateConfig,
   onRendererReady,
-  onAnimationsLoaded
+  onAnimationsLoaded,
+  attachmentOverrides
 }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const rendererRef = useRef<SpineRenderer | null>(null);
@@ -568,6 +570,13 @@ export const PreviewArea: React.FC<PreviewAreaProps> = ({
     rendererRef.current.setTargetFPS(config.fps);
     rendererRef.current.setDebugEnabled(showSkeleton);
   }, [config.backgroundColor, config.scale, config.fps, showSkeleton]);
+
+  // 应用装配台覆盖参数
+  useEffect(() => {
+    if (!rendererRef.current) return;
+    if (!activeItem) return;
+    rendererRef.current.applyAttachmentOverrides(attachmentOverrides || {});
+  }, [attachmentOverrides, activeItem?.id, spineState]);
 
   // Load Asset when active item changes
   useEffect(() => {

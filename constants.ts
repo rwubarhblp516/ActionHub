@@ -19,6 +19,7 @@ export const DEFAULT_CONFIG: ExportConfig = {
     defaultDir: 'none',
     defaultType: 'once',
   },
+  templateContext: undefined,
 };
 
 export const RESOLUTION_PRESETS = [
